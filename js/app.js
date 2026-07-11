@@ -206,9 +206,17 @@ function renderInventory() {
 
   const filterType = document.getElementById('inv-filter-type').value;
   const filterOriginal = document.getElementById('inv-filter-original').value;
+
+  const airlineSelect = document.getElementById('inv-filter-airline');
+  const filterAirline = airlineSelect.value;
+  const airlines = [...new Set(inventory.map(i => i.airline).filter(Boolean))].sort();
+  airlineSelect.innerHTML = '<option value="">Alle</option>' + airlines.map(a => `<option value="${a}">${a}</option>`).join('');
+  if (airlines.includes(filterAirline)) airlineSelect.value = filterAirline;
+
   const filtered = inventory
     .map((i, idx) => ({ ...i, idx }))
-    .filter(i => !filterType || i.cardType === filterType)
+    .filter(i => !filterType || (filterType === 'none' ? !i.cardType : i.cardType === filterType))
+    .filter(i => !filterAirline || i.airline === filterAirline)
     .filter(i => filterOriginal === '' || String(i.original ? 1 : 0) === filterOriginal);
 
   if (inventory.length === 0) {
@@ -549,6 +557,7 @@ document.getElementById('inv-type').addEventListener('change', () => {
 });
 
 document.getElementById('inv-filter-type').addEventListener('change', renderInventory);
+document.getElementById('inv-filter-airline').addEventListener('change', renderInventory);
 document.getElementById('inv-filter-original').addEventListener('change', renderInventory);
 
 document.getElementById('inv-form').addEventListener('submit', async (e) => {
