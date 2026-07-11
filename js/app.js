@@ -32,6 +32,12 @@ function tripPoints(t) {
   return base + bonus;
 }
 
+function segmentPointsWithCo2(range, cls, co2) {
+  const base = pointsForSegment(range, cls);
+  const bonus = Math.round(base * ((co2 || 0) / 100));
+  return base + bonus;
+}
+
 function computeTotals() {
   let p = baseline.p, q = baseline.q, m = baseline.m;
   trips.forEach(t => {
@@ -287,13 +293,13 @@ function renderUpgrades() {
   const sorted = [...upgrades].sort((a, b) => new Date(b.date) - new Date(a.date));
   list.innerHTML = sorted.map(u => {
     const idx = upgrades.indexOf(u);
-    const deltaQP = pointsForSegment(u.range, u.to) - pointsForSegment(u.range, u.from);
+    const deltaQP = segmentPointsWithCo2(u.range, u.to, u.co2) - segmentPointsWithCo2(u.range, u.from, u.co2);
     const perQP = deltaQP > 0 ? (u.cost / deltaQP) : null;
     return `<div class="trip">
       <div class="top">
         <div>
           <div class="route">${u.route}</div>
-          <div class="meta">${u.date} · ${labelClass(u.from)} → ${labelClass(u.to)} · ${u.range === 'continental' ? 'Kontinental' : 'Interkont.'}</div>
+          <div class="meta">${u.date} · ${labelClass(u.from)} → ${labelClass(u.to)} · ${u.range === 'continental' ? 'Kontinental' : 'Interkont.'}${u.co2 > 0 ? ' · CO₂ +' + u.co2 + '%' : ''}</div>
           ${u.note ? `<div class="meta">📝 ${u.note}</div>` : ''}
         </div>
         <div class="pts">
@@ -603,6 +609,7 @@ document.getElementById('upg-form').addEventListener('submit', async (e) => {
     to: document.getElementById('ug-to').value,
     cost: parseFloat(document.getElementById('ug-cost').value) || 0,
     range: document.getElementById('ug-range').value,
+    co2: parseInt(document.getElementById('ug-co2').value) || 0,
     note: document.getElementById('ug-note').value
   });
   await saveUpgrades();
