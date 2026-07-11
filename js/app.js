@@ -194,6 +194,8 @@ function renderFristen() {
   }).join('');
 }
 
+const cardTypeLabel = { airline: 'Airline', city: 'City', aircraft: 'Flugzeugtyp' };
+
 function renderInventory() {
   const list = document.getElementById('inv-list');
   document.getElementById('inv-count').textContent = inventory.length;
@@ -201,23 +203,41 @@ function renderInventory() {
   document.getElementById('inv-summary').textContent = totalCost > 0
     ? `Gesamt bezahlt für Karten: ${totalCost.toLocaleString('de-DE', {minimumFractionDigits: 2})} €`
     : '';
+
+  const filterType = document.getElementById('inv-filter-type').value;
+  const filterOriginal = document.getElementById('inv-filter-original').value;
+  const filtered = inventory
+    .map((i, idx) => ({ ...i, idx }))
+    .filter(i => !filterType || i.cardType === filterType)
+    .filter(i => filterOriginal === '' || String(i.original ? 1 : 0) === filterOriginal);
+
   if (inventory.length === 0) {
     list.innerHTML = '<div class="empty">Noch keine Karten erfasst.</div>';
     return;
   }
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="empty">Keine Karten für diesen Filter.</div>';
+    return;
+  }
   const statusLabel = { neu: 'Neu', duplikat: 'Duplikat', eingeloest: 'Eingelöst' };
   const statusTag = { neu: 'ok', duplikat: 'mid', eingeloest: 'low' };
-  list.innerHTML = inventory.map((i, idx) => `<div class="trip">
+  list.innerHTML = filtered.map(i => {
+    const typeParts = [];
+    if (i.cardType) typeParts.push(cardTypeLabel[i.cardType] || i.cardType);
+    if (i.cardType === 'aircraft' && i.airline) typeParts.push(i.airline);
+    return `<div class="trip">
     <div class="top">
       <div>
         <div class="route">${i.name} ${i.count > 1 ? `×${i.count}` : ''}</div>
+        <div class="meta">${typeParts.length ? typeParts.join(' · ') + ' · ' : ''}${i.original ? 'Original' : 'Nicht original'}</div>
         <div class="meta">${i.cost ? parseFloat(i.cost).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' € bezahlt' : 'kostenlos erhalten'}</div>
         ${i.note ? `<div class="meta">📝 ${i.note}</div>` : ''}
       </div>
       <div class="pts"><span class="tag ${statusTag[i.status]}">${statusLabel[i.status]}</span></div>
     </div>
-    <button class="del" onclick="deleteInventory(${idx})">entfernen</button>
-  </div>`).join('');
+    <button class="del" onclick="deleteInventory(${i.idx})">entfernen</button>
+  </div>`;
+  }).join('');
 }
 
 function renderCalc() {
@@ -300,6 +320,7 @@ function renderUptrip() {
   list.innerHTML = uptripItems.map((u, idx) => {
     const pct = Math.min(100, Math.round((u.have / u.needed) * 100));
     const missing = Math.max(0, u.needed - u.have);
+    const origMissing = Math.max(0, (u.origNeeded || 0) - (u.origHave || 0));
     const rewardParts = [];
     if (u.rewardPoints) rewardParts.push(`${u.rewardPoints} P`);
     if (u.rewardQP) rewardParts.push(`${u.rewardQP} QP`);
@@ -312,6 +333,8 @@ function renderUptrip() {
       statusHtml = `<span class="tag ok">✅ eingelöst${u.redeemedDate ? ' ' + u.redeemedDate : ''}</span>`;
     } else if (missing > 0) {
       statusHtml = `<span class="tag mid">${missing} Karte(n) fehlen</span>`;
+    } else if (origMissing > 0) {
+      statusHtml = `<span class="tag mid">${origMissing} Original-Karte(n) fehlen</span>`;
     } else {
       statusHtml = `<button class="btn small" style="background:var(--green); color:white;" onclick="redeemUptrip(${idx})">✅ Jetzt einlösen</button>`;
     }
@@ -321,6 +344,7 @@ function renderUptrip() {
         <div>
           <div class="route">${u.name}</div>
           <div class="meta">${u.have} / ${u.needed} Karten · ${rewardText}</div>
+          ${u.origNeeded > 0 ? `<div class="meta">🃏 davon Original: ${u.origHave || 0} / ${u.origNeeded}${(u.origHave || 0) < u.origNeeded ? ' ⚠️' : ' ✅'}</div>` : ''}
           ${u.cardNames ? `<div class="meta">🔗 Karten: ${u.cardNames}</div>` : ''}
           ${u.note ? `<div class="meta">📝 ${u.note}</div>` : ''}
         </div>
@@ -519,11 +543,23 @@ document.getElementById('fristen-form').addEventListener('submit', async (e) => 
   render();
 });
 
+document.getElementById('inv-type').addEventListener('change', () => {
+  const isAircraft = document.getElementById('inv-type').value === 'aircraft';
+  document.getElementById('inv-airline-wrap').style.display = isAircraft ? 'block' : 'none';
+});
+
+document.getElementById('inv-filter-type').addEventListener('change', renderInventory);
+document.getElementById('inv-filter-original').addEventListener('change', renderInventory);
+
 document.getElementById('inv-form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  const cardType = document.getElementById('inv-type').value;
   inventory.push({
     name: document.getElementById('inv-name').value,
     count: parseInt(document.getElementById('inv-qty').value) || 1,
+    cardType: cardType || null,
+    airline: cardType === 'aircraft' ? document.getElementById('inv-airline').value : '',
+    original: document.getElementById('inv-original').value === '1',
     status: document.getElementById('inv-status').value,
     cost: parseFloat(document.getElementById('inv-cost').value) || 0,
     note: document.getElementById('inv-note').value
@@ -531,6 +567,7 @@ document.getElementById('inv-form').addEventListener('submit', async (e) => {
   await saveInventory();
   e.target.reset();
   document.getElementById('inv-qty').value = 1;
+  document.getElementById('inv-airline-wrap').style.display = 'none';
   render();
 });
 
@@ -569,6 +606,8 @@ document.getElementById('uptrip-form').addEventListener('submit', async (e) => {
   const name = document.getElementById('up-name').value;
   const needed = parseInt(document.getElementById('up-needed').value) || 1;
   const have = parseInt(document.getElementById('up-have').value) || 0;
+  const origNeeded = parseInt(document.getElementById('up-orig-needed').value) || 0;
+  const origHave = parseInt(document.getElementById('up-orig-have').value) || 0;
   const rewardPoints = parseInt(document.getElementById('up-reward-p').value) || 0;
   const rewardQP = parseInt(document.getElementById('up-reward-q').value) || 0;
   const rewardMeilen = parseInt(document.getElementById('up-reward-m').value) || 0;
@@ -578,7 +617,7 @@ document.getElementById('uptrip-form').addEventListener('submit', async (e) => {
   const existingIdx = uptripItems.findIndex(u => u.name.toLowerCase() === name.toLowerCase());
   const existing = existingIdx >= 0 ? uptripItems[existingIdx] : null;
   const item = {
-    name, needed, have, rewardPoints, rewardQP, rewardMeilen, rewardOther, cardNames, note,
+    name, needed, have, origNeeded, origHave, rewardPoints, rewardQP, rewardMeilen, rewardOther, cardNames, note,
     redeemed: existing ? existing.redeemed : false,
     redeemedDate: existing ? existing.redeemedDate : null
   };
