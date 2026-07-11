@@ -523,14 +523,14 @@ document.getElementById('inv-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   inventory.push({
     name: document.getElementById('inv-name').value,
-    count: parseInt(document.getElementById('inv-count').value) || 1,
+    count: parseInt(document.getElementById('inv-qty').value) || 1,
     status: document.getElementById('inv-status').value,
     cost: parseFloat(document.getElementById('inv-cost').value) || 0,
     note: document.getElementById('inv-note').value
   });
   await saveInventory();
   e.target.reset();
-  document.getElementById('inv-count').value = 1;
+  document.getElementById('inv-qty').value = 1;
   render();
 });
 
