@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="M&M Tracker">
+<meta name="theme-color" content="#041e42">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<title>Miles & More Status-Tracker</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="flex-between">
+      <h1>✈️ Miles & More Status-Tracker</h1>
+      <span class="sync-tag off" id="sync-tag">lokal</span>
+    </div>
+    <p>Philip · Frequent Traveller · Ziel: 700 QP, Senator</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- TAB: DASHBOARD -->
+  <section id="tab-dashboard" class="section active">
+
+    <div class="card">
+      <h2>📊 Dashboard <span id="loading-tag" class="badge">lädt...</span></h2>
+      <div class="stat-row">
+        <div class="stat"><div class="num" id="stat-p">–</div><div class="lbl">Points</div></div>
+        <div class="stat"><div class="num" id="stat-q">–</div><div class="lbl">Qualifying Points</div></div>
+        <div class="stat"><div class="num" id="stat-m">–</div><div class="lbl">Meilen (Pool)</div></div>
+      </div>
+
+      <div class="goal">
+        <div class="goal-head"><span class="name">🎯 Extra Benefit: 1 eVoucher</span><span class="val" id="g700-val">– / 700 QP</span></div>
+        <div class="bar-bg"><div class="bar-fill q" id="g700-bar" style="width:0%"></div></div>
+        <div class="goal-note" id="g700-note"></div>
+      </div>
+
+      <div class="goal">
+        <div class="goal-head"><span class="name">🎯 Extra Benefit: Meilentausch-Option</span><span class="val" id="g800-val">– / 800 QP</span></div>
+        <div class="bar-bg"><div class="bar-fill q" id="g800-bar" style="width:0%"></div></div>
+        <div class="goal-note">Ab hier: bis zu 20.000 Meilen → 125 Points + 125 QP tauschbar</div>
+      </div>
+
+      <div class="goal">
+        <div class="goal-head"><span class="name">🏆 Senator</span><span class="val" id="gsen-val">– / 2.000 P · – / 1.000 QP</span></div>
+        <div class="bar-bg"><div class="bar-fill p" id="gsen-bar-p" style="width:0%"></div></div>
+        <div class="bar-bg" style="margin-top:4px;"><div class="bar-fill q" id="gsen-bar-q" style="width:0%"></div></div>
+        <div class="goal-note">Engpass ist i.d.R. QP (Lufthansa-Group-Flüge) – Points läuft meist automatisch mit</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>⏰ Fristen & Ablaufdaten <span class="badge" id="fristen-count">0</span></h2>
+      <div id="fristen-list"><div class="empty">Keine Fristen erfasst.</div></div>
+      <form id="fristen-form" style="margin-top:10px;">
+        <div class="row2">
+          <div><label>Titel</label><input type="text" id="fr-title" placeholder="z.B. eVoucher" required></div>
+          <div><label>Läuft ab am</label><input type="date" id="fr-date" required></div>
+        </div>
+        <label>Notiz</label>
+        <input type="text" id="fr-note" placeholder="Details">
+        <button type="submit" class="btn secondary">Frist eintragen</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>⚙️ Basiswerte (manueller Startpunkt)</h2>
+      <form id="baseline-form">
+        <div class="row2">
+          <div>
+            <label>Points (aktuell laut App)</label>
+            <input type="number" id="base-p" value="0">
+          </div>
+          <div>
+            <label>Qualifying Points (aktuell)</label>
+            <input type="number" id="base-q" value="0">
+          </div>
+        </div>
+        <label>Meilen-Pool (aktuell)</label>
+        <input type="number" id="base-m" value="0">
+        <button type="submit" class="btn secondary">Basiswerte speichern / aktualisieren</button>
+      </form>
+      <p class="hint">Aktualisiere diese Werte, sobald du einen neuen Screenshot aus der App hast — Trips, Uptrip-Einlösungen etc. werden automatisch draufgerechnet.</p>
+    </div>
+
+  </section>
+
+  <!-- TAB: TRIPS -->
+  <section id="tab-trips" class="section">
+
+    <div class="card">
+      <h2>➕ Trip hinzufügen</h2>
+      <form id="trip-form">
+        <div class="row2">
+          <div>
+            <label>Datum</label>
+            <input type="date" id="t-date" required>
+          </div>
+          <div>
+            <label>Strecke (z.B. FRA–FCO)</label>
+            <input type="text" id="t-route" placeholder="FRA–FCO–FRA" required>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>Reichweite</label>
+            <select id="t-range">
+              <option value="continental">Kontinental (Europa)</option>
+              <option value="intercontinental">Interkontinental</option>
+            </select>
+          </div>
+          <div>
+            <label>Klasse</label>
+            <select id="t-class">
+              <option value="economy">Economy</option>
+              <option value="premium">Premium Economy</option>
+              <option value="business">Business</option>
+              <option value="first">First</option>
+            </select>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>Segmente (Hin+Rück getrennt zählen)</label>
+            <input type="number" id="t-segments" value="2" min="1">
+          </div>
+          <div>
+            <label>CO₂-Kompensation?</label>
+            <select id="t-co2">
+              <option value="0">Nein</option>
+              <option value="30">Ja, ~30% Bonus (Standard)</option>
+              <option value="80">Ja, ~80% Bonus (Maximalpaket)</option>
+            </select>
+          </div>
+        </div>
+        <label>Notiz (optional)</label>
+        <input type="text" id="t-note" placeholder="z.B. über MUC geroutet, Upgrade 140€">
+        <button type="submit" class="btn">Trip speichern</button>
+      </form>
+      <div id="trip-preview" class="hint"></div>
+    </div>
+
+    <div class="card">
+      <h2>🧾 Trip-Log <span class="badge" id="trip-count">0</span></h2>
+      <div id="trip-list"><div class="empty">Noch keine Trips erfasst.</div></div>
+    </div>
+
+  </section>
+
+  <!-- TAB: SAMMELN -->
+  <section id="tab-sammeln" class="section">
+
+    <div class="card">
+      <h2>🎴 Uptrip-Kollektionen <span class="badge" id="uptrip-count">0</span></h2>
+      <div id="uptrip-summary" class="hint" style="margin-top:0;"></div>
+      <form id="uptrip-form" style="margin-top:10px;">
+        <label>Kollektionsname</label>
+        <input type="text" id="up-name" placeholder="z.B. Ready for Takeoff" required>
+        <div class="row2">
+          <div>
+            <label>Karten benötigt</label>
+            <input type="number" id="up-needed" min="1" required>
+          </div>
+          <div>
+            <label>Karten vorhanden</label>
+            <input type="number" id="up-have" min="0" required>
+          </div>
+        </div>
+        <label>Prämie beim Einlösen:</label>
+        <div class="row2">
+          <div><label style="margin-top:0;">Points</label><input type="number" id="up-reward-p" min="0" value="0"></div>
+          <div><label style="margin-top:0;">Qualifying Points</label><input type="number" id="up-reward-q" min="0" value="0"></div>
+        </div>
+        <div class="row2">
+          <div><label>Meilen</label><input type="number" id="up-reward-m" min="0" value="0"></div>
+          <div><label>Sonstiges (z.B. Lounge-Zugang)</label><input type="text" id="up-reward-other" placeholder="optional"></div>
+        </div>
+        <label>Verknüpfte Karten aus Inventar (kommagetrennt, optional)</label>
+        <input type="text" id="up-cardnames" placeholder="z.B. Airline LOT, City Rom">
+        <p class="hint" style="margin:4px 0 0;">Beim Einlösen wird von jeder genannten Karte 1 Stück aus dem Karteninventar unten abgezogen.</p>
+        <label>Notiz</label>
+        <input type="text" id="up-note" placeholder="z.B. fehlende Karte: Airline-Karte LOT">
+        <button type="submit" class="btn secondary">Kollektion eintragen/aktualisieren</button>
+      </form>
+      <div id="uptrip-list" style="margin-top:10px;"><div class="empty">Noch keine Kollektionen erfasst.</div></div>
+    </div>
+
+    <div class="card">
+      <h2>📇 Uptrip-Karteninventar <span class="badge" id="inv-count">0</span></h2>
+      <p class="hint" style="margin-top:0;">Einzelne Karten, die du besitzt — inkl. Duplikate, Einlösestatus und bezahlte Beträge.</p>
+      <form id="inv-form">
+        <div class="row2">
+          <div><label>Kartenname</label><input type="text" id="inv-name" placeholder="z.B. Airline-Karte LOT" required></div>
+          <div><label>Anzahl</label><input type="number" id="inv-count" min="1" value="1" required></div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>Status</label>
+            <select id="inv-status">
+              <option value="neu">Neu</option>
+              <option value="duplikat">Duplikat</option>
+              <option value="eingeloest">Eingelöst</option>
+            </select>
+          </div>
+          <div><label>Bezahlt (€, optional)</label><input type="number" id="inv-cost" step="0.01" min="0" placeholder="0,00"></div>
+        </div>
+        <label>Notiz</label>
+        <input type="text" id="inv-note" placeholder="z.B. für Ready for Takeoff gekauft">
+        <button type="submit" class="btn secondary">Karte eintragen</button>
+      </form>
+      <div id="inv-summary" class="hint" style="margin-top:6px;"></div>
+      <div id="inv-list" style="margin-top:6px;"><div class="empty">Noch keine Karten erfasst.</div></div>
+    </div>
+
+    <div class="card">
+      <h2>🔄 Marktplatz & Mixer <span class="badge" id="mp-count">0</span></h2>
+      <p class="hint" style="margin-top:0;">Jeder Tausch wird hier erfasst — abgegebene Karten werden automatisch aus dem Inventar oben abgezogen, erhaltene automatisch ergänzt.</p>
+      <form id="mp-form">
+        <div class="row2">
+          <div><label>Datum</label><input type="date" id="mp-date" required></div>
+          <div>
+            <label>Typ</label>
+            <select id="mp-type">
+              <option value="Marktplatz-Tausch">Marktplatz-Tausch</option>
+              <option value="Mixer">Mixer (Mix & Pick)</option>
+            </select>
+          </div>
+        </div>
+        <label>Abgegebene Karten (Name:Anzahl, kommagetrennt)</label>
+        <input type="text" id="mp-given" placeholder="z.B. City Rom:2, Airline SWISS:1">
+        <label>Erhaltene Karten (Name:Anzahl, kommagetrennt)</label>
+        <input type="text" id="mp-received" placeholder="z.B. Airline LOT:1">
+        <div class="row2">
+          <div><label>Verhältnis (optional, z.B. 2:1)</label><input type="text" id="mp-ratio" placeholder="2:1"></div>
+          <div><label>Gebühr (€)</label><input type="number" id="mp-cost" step="0.01" min="0" value="1.99"></div>
+        </div>
+        <label>Notiz</label>
+        <input type="text" id="mp-note" placeholder="z.B. für Ready for Takeoff Joker-Ersatz">
+        <button type="submit" class="btn secondary">Tausch eintragen</button>
+      </form>
+      <div id="mp-summary" class="hint" style="margin-top:6px;"></div>
+      <div id="mp-list" style="margin-top:6px;"><div class="empty">Noch keine Tausche erfasst.</div></div>
+    </div>
+
+  </section>
+
+  <!-- TAB: RECHNER -->
+  <section id="tab-rechner" class="section">
+
+    <div class="card">
+      <h2>💰 Wertrechner: €/Point & €/QP</h2>
+      <p class="hint" style="margin-top:0;">Trag eine Ausgabe ein — berechnet Kosten pro Point und pro Qualifying Point, sortiert nach bestem Wert.</p>
+      <form id="calc-form">
+        <div class="row2">
+          <div>
+            <label>Kanal</label>
+            <select id="c-type">
+              <option value="Upgrade">Business-Upgrade</option>
+              <option value="Uptrip">Uptrip-Kollektion</option>
+              <option value="Kreditkarte">Kreditkarten-Tausch</option>
+              <option value="Sonstiges">Sonstiges</option>
+            </select>
+          </div>
+          <div><label>Kosten (€)</label><input type="number" id="c-cost" step="0.01" min="0" required></div>
+        </div>
+        <div class="row2">
+          <div><label>Points gewonnen</label><input type="number" id="c-points" min="0" required></div>
+          <div><label>QP gewonnen</label><input type="number" id="c-qp" min="0" required></div>
+        </div>
+        <label>Notiz</label>
+        <input type="text" id="c-note" placeholder="z.B. FRA-FCO Festpreis-Upgrade">
+        <button type="submit" class="btn secondary">Berechnen & speichern</button>
+      </form>
+      <div id="calc-list" style="margin-top:10px;"><div class="empty">Noch keine Berechnungen gespeichert.</div></div>
+    </div>
+
+    <div class="card">
+      <h2>🛫 Gebuchte Upgrades <span class="badge" id="upg-count">0</span></h2>
+      <p class="hint" style="margin-top:0;">Reine Kosten-/Wert-Übersicht. Den Flug selbst weiterhin normal im Trip-Log eintragen (mit Klasse „Business“), damit die Punkte-Totals stimmen.</p>
+      <form id="upg-form">
+        <div class="row2">
+          <div><label>Datum</label><input type="date" id="ug-date" required></div>
+          <div><label>Strecke</label><input type="text" id="ug-route" placeholder="FRA–FCO" required></div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>Von Klasse</label>
+            <select id="ug-from">
+              <option value="economy">Economy</option>
+              <option value="premium">Premium Economy</option>
+              <option value="business">Business</option>
+            </select>
+          </div>
+          <div>
+            <label>Auf Klasse</label>
+            <select id="ug-to">
+              <option value="business" selected>Business</option>
+              <option value="first">First</option>
+            </select>
+          </div>
+        </div>
+        <div class="row2">
+          <div><label>Kosten (€)</label><input type="number" id="ug-cost" step="0.01" min="0" required></div>
+          <div>
+            <label>Reichweite</label>
+            <select id="ug-range">
+              <option value="continental">Kontinental</option>
+              <option value="intercontinental">Interkontinental</option>
+            </select>
+          </div>
+        </div>
+        <label>Notiz</label>
+        <input type="text" id="ug-note" placeholder="z.B. Festpreis-Upgrade, myOffer-Gebot">
+        <button type="submit" class="btn secondary">Upgrade speichern</button>
+      </form>
+      <div id="upg-list" style="margin-top:10px;"><div class="empty">Noch keine Upgrades erfasst.</div></div>
+    </div>
+
+  </section>
+
+  <!-- TAB: MEHR -->
+  <section id="tab-mehr" class="section">
+
+    <div class="card">
+      <h2>🔥 Lohnenswerte Aktionen</h2>
+      <div id="promo-list">
+        <div class="empty">Noch keine Aktionen eingetragen.</div>
+      </div>
+      <form id="promo-form" style="margin-top:10px;">
+        <div class="row2">
+          <div><label>Titel</label><input type="text" id="pr-title" placeholder="z.B. 2x Meilen Kreditkarte"></div>
+          <div><label>Gültig bis</label><input type="date" id="pr-date"></div>
+        </div>
+        <label>Kurz-Notiz</label>
+        <input type="text" id="pr-note" placeholder="Bedingungen / Nutzen">
+        <button type="submit" class="btn secondary">Aktion eintragen</button>
+      </form>
+    </div>
+
+    <div class="card" style="text-align:center;">
+      <button class="btn secondary" id="reset-btn" style="border-color:#c0392b; color:#c0392b;">Alle Daten zurücksetzen</button>
+    </div>
+  </section>
+
+</div>
+
+<nav class="tabbar">
+  <button class="tab-btn active" data-tab="tab-dashboard"><span class="ic">📊</span>Dashboard</button>
+  <button class="tab-btn" data-tab="tab-trips"><span class="ic">🧾</span>Trips</button>
+  <button class="tab-btn" data-tab="tab-sammeln"><span class="ic">🎴</span>Sammeln</button>
+  <button class="tab-btn" data-tab="tab-rechner"><span class="ic">💰</span>Rechner</button>
+  <button class="tab-btn" data-tab="tab-mehr"><span class="ic">⋯</span>Mehr</button>
+</nav>
+
+<script src="js/vendor/supabase.js"></script>
+<script src="js/supabase-config.js"></script>
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
