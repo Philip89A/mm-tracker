@@ -170,6 +170,44 @@ th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: upp
 .uptrip-card .del { color: #ffb4a8; }
 .uptrip-card .btn.small.secondary { background: rgba(255,255,255,0.1); color: white; border-color: rgba(255,255,255,0.4); }
 
+.auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(160deg, var(--navy), var(--navy2));
+  padding: 24px;
+}
+.auth-card {
+  background: white;
+  border-radius: 16px;
+  padding: 26px 22px;
+  width: 100%;
+  max-width: 360px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+}
+.auth-card h1 { font-size: 19px; color: var(--navy); margin: 0 0 4px; }
+.auth-error {
+  background: #fbeaea;
+  color: var(--red);
+  font-size: 12.5px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin-top: 10px;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--navy2);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  margin-top: 14px;
+  display: inline-block;
+}
+
 .sync-tag { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
 .sync-tag.ok { background: #e3f5ec; color: var(--green); }
 .sync-tag.off { background: #fbeaea; color: var(--red); }

@@ -11,13 +11,16 @@
  * There is no realtime push between devices — reopening the app (or a
  * manual reload) is what picks up changes made on the other device.
  */
-const DB = (() => {
-  const PREFIX = 'mm_';
-  const TABLE = 'mm_store';
+let currentUserId = null;
 
-  let client = null;
-  if (typeof supabase !== 'undefined' && typeof SUPABASE_URL !== 'undefined' && SUPABASE_URL) {
-    client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const DB = (() => {
+  const TABLE = 'mm_store';
+  const client = supabaseClient;
+
+  // Local cache keys are namespaced per user so two accounts on the same
+  // browser/device never see each other's cached data, even offline.
+  function prefix() {
+    return 'mm_' + (currentUserId || 'anon') + '_';
   }
 
   function setSyncTag(state) {
@@ -31,7 +34,7 @@ const DB = (() => {
 
   function readLocal(key, fallback) {
     try {
-      const raw = localStorage.getItem(PREFIX + key);
+      const raw = localStorage.getItem(prefix() + key);
       return raw !== null ? JSON.parse(raw) : fallback;
     } catch (e) {
       console.error('DB local read failed', key, e);
@@ -41,7 +44,7 @@ const DB = (() => {
 
   function writeLocal(key, value) {
     try {
-      localStorage.setItem(PREFIX + key, JSON.stringify(value));
+      localStorage.setItem(prefix() + key, JSON.stringify(value));
     } catch (e) {
       console.error('DB local write failed', key, e);
     }
@@ -77,7 +80,10 @@ const DB = (() => {
       return;
     }
     try {
-      const { error } = await client.from(TABLE).upsert({ key, value, updated_at: new Date().toISOString() });
+      const { error } = await client.from(TABLE).upsert(
+        { key, value, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id,key' }
+      );
       if (error) throw error;
       setSyncTag('ok');
     } catch (e) {

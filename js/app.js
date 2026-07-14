@@ -438,12 +438,12 @@ function renderUptrip() {
     }).join('');
 
     const availableCards = inventory.filter(i => i.status !== 'eingeloest' && freeCountForInv(i, idx) > 0);
-    const assignPicker = !limitReached ? `<div style="margin-top:8px; display:flex; gap:6px;">
-        <select id="assign-select-${idx}" style="flex:1;">
-          <option value="">Karte aus Inventar wählen…</option>
+    const assignPicker = !limitReached ? `<div style="margin-top:8px;">
+        <select id="assign-select-${idx}" multiple size="${Math.min(6, Math.max(3, availableCards.length))}" style="width:100%;">
           ${availableCards.map(i => `<option value="${i.id}">${i.name} (frei: ${freeCountForInv(i, idx)})</option>`).join('')}
         </select>
-        <button class="btn small" style="width:auto;" onclick="assignSelectedCard(${idx})">+ Zuordnen</button>
+        <p class="hint" style="margin:4px 0 0;">Mehrere Karten auswählen: am Handy antippen, am Computer Strg/Cmd gedrückt halten.</p>
+        <button class="btn small secondary" style="width:100%; margin-top:6px;" onclick="assignSelectedCards(${idx})">+ Ausgewählte zuordnen</button>
       </div>` : '';
 
     return `<div class="uptrip-card">
@@ -560,22 +560,21 @@ window.deleteUpgrade = async function(idx) { upgrades.splice(idx, 1); await save
 window.deleteMarketplace = async function(idx) { marketplace.splice(idx, 1); await saveMarketplace(); render(); };
 window.deleteUptrip = async function(idx) { uptripItems.splice(idx, 1); await saveUptrip(); render(); };
 
-window.assignSelectedCard = async function(idx) {
+window.assignSelectedCards = async function(idx) {
   const select = document.getElementById(`assign-select-${idx}`);
-  const invId = select && select.value;
-  if (!invId) return;
-  await assignCardToUptrip(idx, invId);
-};
-
-window.assignCardToUptrip = async function(idx, invId) {
+  if (!select) return;
+  const ids = Array.from(select.selectedOptions).map(o => o.value).filter(Boolean);
+  if (ids.length === 0) return;
   const u = uptripItems[idx];
-  const inv = inventory.find(i => i.id === invId);
-  if (!u || !inv) return;
-  if (freeCountForInv(inv, idx) <= 0) return;
+  if (!u) return;
   u.assignedCards = u.assignedCards || [];
-  const existing = u.assignedCards.find(a => a.invId === invId);
-  if (existing) existing.count += 1;
-  else u.assignedCards.push({ invId, count: 1 });
+  ids.forEach(invId => {
+    const inv = inventory.find(i => i.id === invId);
+    if (!inv || freeCountForInv(inv, idx) <= 0) return;
+    const existing = u.assignedCards.find(a => a.invId === invId);
+    if (existing) existing.count += 1;
+    else u.assignedCards.push({ invId, count: 1 });
+  });
   await saveUptrip();
   render();
 };
@@ -845,4 +844,4 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-loadAll();
+// loadAll() is triggered by auth.js once a Supabase Auth session exists.
