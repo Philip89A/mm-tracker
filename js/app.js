@@ -89,9 +89,68 @@ function applyCardDelta(name, delta) {
     if (inv) {
       inv.count += delta;
     } else {
-      inventory.push({ name, count: delta, status: 'neu', cost: 0, note: 'aus Tausch/Mixer erhalten' });
+      inventory.push({ id: genId(), name, count: delta, status: 'neu', cost: 0, note: 'aus Tausch/Mixer erhalten' });
     }
   }
+}
+
+function genId() {
+  return 'inv_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+// Karten, die einer Kollektion zugeordnet sind, gelten für andere Kollektionen als "belegt".
+function assignedTotalForInv(invId, excludeUptripIdx) {
+  let total = 0;
+  uptripItems.forEach((u, i) => {
+    if (i === excludeUptripIdx) return;
+    (u.assignedCards || []).forEach(a => { if (a.invId === invId) total += a.count; });
+  });
+  return total;
+}
+
+function freeCountForInv(inv, excludeUptripIdx) {
+  return inv.count - assignedTotalForInv(inv.id, excludeUptripIdx);
+}
+
+function uptripHave(u) {
+  return (u.assignedCards || []).reduce((s, a) => s + a.count, 0);
+}
+
+function uptripOrigHave(u) {
+  return (u.assignedCards || []).reduce((s, a) => {
+    const inv = inventory.find(i => i.id === a.invId);
+    return s + (inv && inv.original ? a.count : 0);
+  }, 0);
+}
+
+// Kollektionen aus der Zeit vor der Karten-Verknüpfung nutzten ein Freitextfeld
+// (cardNames). Hier versuchen wir einmalig, dafür passende Inventar-Karten
+// anhand des Namens automatisch zuzuordnen, statt bei 0/needed neu anzufangen.
+function migrateLegacyUptripCardNames() {
+  let changed = false;
+  uptripItems.forEach((u, idx) => {
+    if (u.assignedCards) return;
+    u.assignedCards = [];
+    changed = true;
+    if (!u.cardNames) return;
+    const names = u.cardNames.split(',').map(s => s.trim()).filter(Boolean);
+    const counts = {};
+    names.forEach(n => { const k = n.toLowerCase(); counts[k] = (counts[k] || 0) + 1; });
+    Object.keys(counts).forEach(lname => {
+      let remaining = counts[lname];
+      inventory.forEach(inv => {
+        if (remaining <= 0) return;
+        if (inv.name.toLowerCase() !== lname) return;
+        const free = freeCountForInv(inv, idx);
+        if (free <= 0) return;
+        const take = Math.min(free, remaining);
+        const existing = u.assignedCards.find(a => a.invId === inv.id);
+        if (existing) existing.count += take; else u.assignedCards.push({ invId: inv.id, count: take });
+        remaining -= take;
+      });
+    });
+  });
+  return changed;
 }
 
 // ---------- render ----------
@@ -238,11 +297,14 @@ function renderInventory() {
     const typeParts = [];
     if (i.cardType) typeParts.push(cardTypeLabel[i.cardType] || i.cardType);
     if (i.cardType === 'aircraft' && i.airline) typeParts.push(i.airline);
+    const assigned = i.id ? assignedTotalForInv(i.id) : 0;
+    const free = i.count - assigned;
     return `<div class="trip">
     <div class="top">
       <div>
         <div class="route">${i.name} ${i.count > 1 ? `×${i.count}` : ''}</div>
         <div class="meta">${typeParts.length ? typeParts.join(' · ') + ' · ' : ''}${i.original ? 'Original' : 'Nicht original'}</div>
+        <div class="meta">${assigned > 0 ? `${free} frei · ${assigned} in Kollektion(en)` : `${free} frei`}</div>
         <div class="meta">${i.cost ? parseFloat(i.cost).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' € bezahlt' : 'kostenlos erhalten'}</div>
         ${i.note ? `<div class="meta">📝 ${i.note}</div>` : ''}
       </div>
@@ -336,12 +398,12 @@ function renderUptrip() {
 
   list.innerHTML = uptripItems.map((u, idx) => {
     const needed = u.needed || 1;
-    const have = Math.min(u.have || 0, needed);
+    const have = Math.min(uptripHave(u), needed);
     const complete = have >= needed;
     const offset = RING_C * (1 - have / needed);
 
     const origNeeded = u.origNeeded || 0;
-    const origHave = u.origHave || 0;
+    const origHave = uptripOrigHave(u);
     const origSatisfied = origHave >= origNeeded;
 
     const maxRedemptions = u.maxRedemptions || 1;
@@ -366,6 +428,24 @@ function renderUptrip() {
       actionHtml = `<button class="btn small" style="background:var(--green); color:white;" onclick="redeemUptrip(${idx})">✅ Jetzt einlösen</button>`;
     }
 
+    const assignedRows = (u.assignedCards || []).map(a => {
+      const inv = inventory.find(i => i.id === a.invId);
+      const label = inv ? inv.name + (inv.original ? ' · Original' : '') : '(gelöschte Karte)';
+      return `<div class="flex-between" style="margin-top:4px;">
+        <span>${label}${a.count > 1 ? ' ×' + a.count : ''}</span>
+        <button class="del" onclick="unassignCardFromUptrip(${idx}, '${a.invId}')">− entfernen</button>
+      </div>`;
+    }).join('');
+
+    const availableCards = inventory.filter(i => i.status !== 'eingeloest' && freeCountForInv(i, idx) > 0);
+    const assignPicker = !limitReached ? `<div style="margin-top:8px; display:flex; gap:6px;">
+        <select id="assign-select-${idx}" style="flex:1;">
+          <option value="">Karte aus Inventar wählen…</option>
+          ${availableCards.map(i => `<option value="${i.id}">${i.name} (frei: ${freeCountForInv(i, idx)})</option>`).join('')}
+        </select>
+        <button class="btn small" style="width:auto;" onclick="assignSelectedCard(${idx})">+ Zuordnen</button>
+      </div>` : '';
+
     return `<div class="uptrip-card">
       <div class="uptrip-card-top">
         <div class="ring-wrap">
@@ -386,14 +466,15 @@ function renderUptrip() {
       ${origNeeded > 0 ? `<div class="uptrip-row ${origSatisfied ? 'ok' : 'warn'}">
         <span>✈️ Min. ${origNeeded} Original-Karten</span><span>${origHave}/${origNeeded} ${origSatisfied ? '✅' : '⚠️'}</span>
       </div>` : ''}
-      ${u.cardNames ? `<div class="meta-line">🔗 Karten: ${u.cardNames}</div>` : ''}
+      <div class="uptrip-row" style="display:block;">
+        <div class="flex-between"><span>🔗 Zugeordnete Karten</span></div>
+        ${assignedRows || '<div class="meta-line" style="margin-top:2px;">Noch keine Karten zugeordnet.</div>'}
+        ${assignPicker}
+      </div>
       ${u.note ? `<div class="meta-line">📝 ${u.note}</div>` : ''}
       <div class="actions">
         <div>${actionHtml}</div>
-        ${!limitReached ? `<div>
-          <button class="btn small secondary" onclick="adjustUptripCard(${idx}, -1)" ${have <= 0 ? 'disabled' : ''}>−1</button>
-          <button class="btn small" onclick="adjustUptripCard(${idx}, 1)" ${have >= needed ? 'disabled' : ''} style="margin-left:6px;">+1 Karte</button>
-        </div>` : '<div></div>'}
+        <div></div>
       </div>
       <div class="flex-between" style="margin-top:8px;">
         <button class="del" onclick="deleteUptrip(${idx})">entfernen</button>
@@ -454,6 +535,12 @@ async function loadAll() {
   upgrades = await DB.get(KEY_UPGRADES, []);
   marketplace = await DB.get(KEY_MARKETPLACE, []);
 
+  let inventoryMigrated = false;
+  inventory.forEach(i => { if (!i.id) { i.id = genId(); inventoryMigrated = true; } });
+  if (inventoryMigrated) await saveInventory();
+
+  if (migrateLegacyUptripCardNames()) await saveUptrip();
+
   document.getElementById('base-p').value = baseline.p;
   document.getElementById('base-q').value = baseline.q;
   document.getElementById('base-m').value = baseline.m;
@@ -473,11 +560,33 @@ window.deleteUpgrade = async function(idx) { upgrades.splice(idx, 1); await save
 window.deleteMarketplace = async function(idx) { marketplace.splice(idx, 1); await saveMarketplace(); render(); };
 window.deleteUptrip = async function(idx) { uptripItems.splice(idx, 1); await saveUptrip(); render(); };
 
-window.adjustUptripCard = async function(idx, delta) {
+window.assignSelectedCard = async function(idx) {
+  const select = document.getElementById(`assign-select-${idx}`);
+  const invId = select && select.value;
+  if (!invId) return;
+  await assignCardToUptrip(idx, invId);
+};
+
+window.assignCardToUptrip = async function(idx, invId) {
   const u = uptripItems[idx];
-  if (!u || (u.redemptionCount || 0) >= (u.maxRedemptions || 1)) return;
-  u.have = Math.max(0, Math.min(u.needed, u.have + delta));
-  uptripItems[idx] = u;
+  const inv = inventory.find(i => i.id === invId);
+  if (!u || !inv) return;
+  if (freeCountForInv(inv, idx) <= 0) return;
+  u.assignedCards = u.assignedCards || [];
+  const existing = u.assignedCards.find(a => a.invId === invId);
+  if (existing) existing.count += 1;
+  else u.assignedCards.push({ invId, count: 1 });
+  await saveUptrip();
+  render();
+};
+
+window.unassignCardFromUptrip = async function(idx, invId) {
+  const u = uptripItems[idx];
+  if (!u || !u.assignedCards) return;
+  const existing = u.assignedCards.find(a => a.invId === invId);
+  if (!existing) return;
+  existing.count -= 1;
+  if (existing.count <= 0) u.assignedCards = u.assignedCards.filter(a => a.invId !== invId);
   await saveUptrip();
   render();
 };
@@ -494,25 +603,25 @@ window.redeemUptrip = async function(idx) {
   if (u.rewardQP) parts.push(`+${u.rewardQP} Qualifying Points`);
   if (u.rewardMeilen) parts.push(`+${u.rewardMeilen} Meilen`);
   if (u.rewardOther) parts.push(u.rewardOther);
-  const msg = `"${u.name}" einlösen (${redemptionCount + 1}/${maxRedemptions})?\n\nDu erhältst:\n${parts.join('\n') || '(keine numerische Prämie hinterlegt)'}\n\nDas wird sofort zu deinem Dashboard addiert.${u.cardNames ? '\nVerknüpfte Karten werden aus dem Inventar abgezogen: ' + u.cardNames : ''}`;
+  const assignedNames = (u.assignedCards || []).map(a => {
+    const inv = inventory.find(i => i.id === a.invId);
+    return inv ? `${inv.name}${a.count > 1 ? ' ×' + a.count : ''}` : null;
+  }).filter(Boolean);
+  const msg = `"${u.name}" einlösen (${redemptionCount + 1}/${maxRedemptions})?\n\nDu erhältst:\n${parts.join('\n') || '(keine numerische Prämie hinterlegt)'}\n\nDas wird sofort zu deinem Dashboard addiert.${assignedNames.length ? '\nZugeordnete Karten werden aus dem Inventar abgezogen: ' + assignedNames.join(', ') : ''}`;
   if (!confirm(msg)) return;
+
+  (u.assignedCards || []).forEach(a => {
+    const inv = inventory.find(i => i.id === a.invId);
+    if (inv) {
+      inv.count -= a.count;
+      if (inv.count <= 0) { inv.status = 'eingeloest'; inv.count = 0; }
+    }
+  });
+  await saveInventory();
 
   u.redemptionCount = redemptionCount + 1;
   u.redeemedDate = new Date().toISOString().slice(0, 10);
-  u.have = 0;
-  u.origHave = 0;
-
-  if (u.cardNames) {
-    const names = u.cardNames.split(',').map(s => s.trim()).filter(Boolean);
-    names.forEach(n => {
-      const inv = inventory.find(i => i.name.toLowerCase() === n.toLowerCase() && i.count > 0 && i.status !== 'eingeloest');
-      if (inv) {
-        inv.count -= 1;
-        if (inv.count <= 0) { inv.status = 'eingeloest'; inv.count = 0; }
-      }
-    });
-    await saveInventory();
-  }
+  u.assignedCards = [];
 
   uptripItems[idx] = u;
   await saveUptrip();
@@ -522,10 +631,8 @@ window.redeemUptrip = async function(idx) {
 window.undoUptrip = async function(idx) {
   const u = uptripItems[idx];
   if (!u || !(u.redemptionCount > 0)) return;
-  if (!confirm(`Letzte Einlösung von "${u.name}" rückgängig machen? Die Points/QP/Meilen dieser Einlösung werden aus dem Dashboard wieder abgezogen, die Karten gelten wieder als vollständig vorhanden. Hinweis: bereits abgezogene Inventar-Karten werden dabei NICHT automatisch zurückgebucht — die musst du manuell im Karteninventar korrigieren.`)) return;
+  if (!confirm(`Letzte Einlösung von "${u.name}" rückgängig machen? Nur die Points/QP/Meilen dieser Einlösung werden aus dem Dashboard wieder abgezogen. Die dafür verbrauchten Karten wurden bereits aus dem Inventar entfernt und werden NICHT automatisch zurückgebucht — das musst du manuell im Karteninventar korrigieren, falls nötig.`)) return;
   u.redemptionCount -= 1;
-  u.have = u.needed;
-  u.origHave = u.origNeeded || 0;
   uptripItems[idx] = u;
   await saveUptrip();
   render();
@@ -601,6 +708,7 @@ document.getElementById('inv-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const cardType = document.getElementById('inv-type').value;
   inventory.push({
+    id: genId(),
     name: document.getElementById('inv-name').value,
     count: parseInt(document.getElementById('inv-qty').value) || 1,
     cardType: cardType || null,
@@ -652,20 +760,19 @@ document.getElementById('uptrip-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = document.getElementById('up-name').value;
   const needed = parseInt(document.getElementById('up-needed').value) || 1;
-  const have = parseInt(document.getElementById('up-have').value) || 0;
   const origNeeded = parseInt(document.getElementById('up-orig-needed').value) || 0;
-  const origHave = parseInt(document.getElementById('up-orig-have').value) || 0;
   const maxRedemptions = parseInt(document.getElementById('up-max-redemptions').value) || 1;
   const rewardPoints = parseInt(document.getElementById('up-reward-p').value) || 0;
   const rewardQP = parseInt(document.getElementById('up-reward-q').value) || 0;
   const rewardMeilen = parseInt(document.getElementById('up-reward-m').value) || 0;
   const rewardOther = document.getElementById('up-reward-other').value;
-  const cardNames = document.getElementById('up-cardnames').value;
   const note = document.getElementById('up-note').value;
   const existingIdx = uptripItems.findIndex(u => u.name.toLowerCase() === name.toLowerCase());
   const existing = existingIdx >= 0 ? uptripItems[existingIdx] : null;
   const item = {
-    name, needed, have, origNeeded, origHave, maxRedemptions, rewardPoints, rewardQP, rewardMeilen, rewardOther, cardNames, note,
+    name, needed, origNeeded, maxRedemptions, rewardPoints, rewardQP, rewardMeilen, rewardOther, note,
+    assignedCards: existing ? (existing.assignedCards || []) : [],
+    cardNames: existing ? existing.cardNames : '',
     redemptionCount: existing ? (existing.redemptionCount || 0) : 0,
     redeemedDate: existing ? existing.redeemedDate : null
   };
