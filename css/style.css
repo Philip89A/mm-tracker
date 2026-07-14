@@ -137,6 +137,39 @@ th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: upp
 .hint { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
 .flex-between { display:flex; justify-content:space-between; align-items:center; }
 
+.uptrip-card {
+  background: linear-gradient(160deg, var(--navy), var(--navy2));
+  border-radius: 14px;
+  padding: 16px;
+  margin-top: 12px;
+  color: white;
+}
+.uptrip-card-top { display: flex; align-items: center; gap: 14px; }
+.ring-wrap { position: relative; width: 68px; height: 68px; flex-shrink: 0; }
+.ring-wrap svg { width: 68px; height: 68px; transform: rotate(-90deg); }
+.ring-bg { fill: none; stroke: rgba(255,255,255,0.18); stroke-width: 8; }
+.ring-fg { fill: none; stroke: var(--gold-light); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 0.4s ease; }
+.ring-fg.complete { stroke: var(--green); }
+.ring-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; }
+.uptrip-card-title .name { font-weight: 700; font-size: 15px; }
+.uptrip-card-title .reward { font-size: 12px; opacity: 0.85; margin-top: 3px; }
+.uptrip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  margin-top: 10px;
+}
+.uptrip-row.warn { background: rgba(184,134,11,0.25); }
+.uptrip-row.ok { background: rgba(27,138,90,0.25); }
+.uptrip-card .meta-line { font-size: 11.5px; opacity: 0.75; margin-top: 8px; }
+.uptrip-card .actions { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
+.uptrip-card .del { color: #ffb4a8; }
+.uptrip-card .btn.small.secondary { background: rgba(255,255,255,0.1); color: white; border-color: rgba(255,255,255,0.4); }
+
 .sync-tag { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
 .sync-tag.ok { background: #e3f5ec; color: var(--green); }
 .sync-tag.off { background: #fbeaea; color: var(--red); }

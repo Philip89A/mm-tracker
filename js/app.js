@@ -46,11 +46,10 @@ function computeTotals() {
     q += total;
   });
   uptripItems.forEach(u => {
-    if (u.redeemed) {
-      p += (u.rewardPoints || 0);
-      q += (u.rewardQP || 0);
-      m += (u.rewardMeilen || 0);
-    }
+    const times = u.redemptionCount || 0;
+    p += (u.rewardPoints || 0) * times;
+    q += (u.rewardQP || 0) * times;
+    m += (u.rewardMeilen || 0) * times;
   });
   return { p, q, m };
 }
@@ -316,13 +315,13 @@ function renderUptrip() {
   const list = document.getElementById('uptrip-list');
   document.getElementById('uptrip-count').textContent = uptripItems.length;
 
-  const redeemedItems = uptripItems.filter(u => u.redeemed);
-  if (redeemedItems.length > 0) {
-    const sumP = redeemedItems.reduce((s, u) => s + (u.rewardPoints || 0), 0);
-    const sumQ = redeemedItems.reduce((s, u) => s + (u.rewardQP || 0), 0);
-    const sumM = redeemedItems.reduce((s, u) => s + (u.rewardMeilen || 0), 0);
+  const totalRedemptions = uptripItems.reduce((s, u) => s + (u.redemptionCount || 0), 0);
+  if (totalRedemptions > 0) {
+    const sumP = uptripItems.reduce((s, u) => s + (u.rewardPoints || 0) * (u.redemptionCount || 0), 0);
+    const sumQ = uptripItems.reduce((s, u) => s + (u.rewardQP || 0) * (u.redemptionCount || 0), 0);
+    const sumM = uptripItems.reduce((s, u) => s + (u.rewardMeilen || 0) * (u.redemptionCount || 0), 0);
     document.getElementById('uptrip-summary').textContent =
-      `Bereits eingelöst: ${redeemedItems.length} Kollektion(en) — insgesamt +${sumP} Points, +${sumQ} QP, +${sumM} Meilen (bereits im Dashboard enthalten)`;
+      `Bisher ${totalRedemptions}× eingelöst — insgesamt +${sumP} Points, +${sumQ} QP, +${sumM} Meilen (bereits im Dashboard enthalten)`;
   } else {
     document.getElementById('uptrip-summary').textContent = '';
   }
@@ -331,10 +330,24 @@ function renderUptrip() {
     list.innerHTML = '<div class="empty">Noch keine Kollektionen erfasst.</div>';
     return;
   }
+
+  const RING_R = 42;
+  const RING_C = 2 * Math.PI * RING_R;
+
   list.innerHTML = uptripItems.map((u, idx) => {
-    const pct = Math.min(100, Math.round((u.have / u.needed) * 100));
-    const missing = Math.max(0, u.needed - u.have);
-    const origMissing = Math.max(0, (u.origNeeded || 0) - (u.origHave || 0));
+    const needed = u.needed || 1;
+    const have = Math.min(u.have || 0, needed);
+    const complete = have >= needed;
+    const offset = RING_C * (1 - have / needed);
+
+    const origNeeded = u.origNeeded || 0;
+    const origHave = u.origHave || 0;
+    const origSatisfied = origHave >= origNeeded;
+
+    const maxRedemptions = u.maxRedemptions || 1;
+    const redemptionCount = u.redemptionCount || 0;
+    const limitReached = redemptionCount >= maxRedemptions;
+
     const rewardParts = [];
     if (u.rewardPoints) rewardParts.push(`${u.rewardPoints} P`);
     if (u.rewardQP) rewardParts.push(`${u.rewardQP} QP`);
@@ -342,38 +355,49 @@ function renderUptrip() {
     if (u.rewardOther) rewardParts.push(u.rewardOther);
     const rewardText = rewardParts.join(' · ') || '–';
 
-    let statusHtml;
-    if (u.redeemed) {
-      statusHtml = `<span class="tag ok">✅ eingelöst${u.redeemedDate ? ' ' + u.redeemedDate : ''}</span>`;
-    } else if (missing > 0) {
-      statusHtml = `<span class="tag mid">${missing} Karte(n) fehlen</span>`;
-    } else if (origMissing > 0) {
-      statusHtml = `<span class="tag mid">${origMissing} Original-Karte(n) fehlen</span>`;
+    let actionHtml;
+    if (limitReached) {
+      actionHtml = `<span class="tag ok">✅ Limit erreicht (${redemptionCount}/${maxRedemptions})</span>`;
+    } else if (!complete) {
+      actionHtml = `<span class="tag mid">${needed - have} Karte(n) fehlen</span>`;
+    } else if (!origSatisfied) {
+      actionHtml = `<span class="tag mid">${origNeeded - origHave} Original-Karte(n) fehlen</span>`;
     } else {
-      statusHtml = `<button class="btn small" style="background:var(--green); color:white;" onclick="redeemUptrip(${idx})">✅ Jetzt einlösen</button>`;
+      actionHtml = `<button class="btn small" style="background:var(--green); color:white;" onclick="redeemUptrip(${idx})">✅ Jetzt einlösen</button>`;
     }
 
-    return `<div class="trip">
-      <div class="top">
-        <div>
-          <div class="route">${u.name}</div>
-          <div class="meta">${u.have} / ${u.needed} Karten · ${rewardText}</div>
-          ${u.origNeeded > 0 ? `<div class="meta">🃏 davon Original: ${u.origHave || 0} / ${u.origNeeded}${(u.origHave || 0) < u.origNeeded ? ' ⚠️' : ' ✅'}</div>` : ''}
-          ${u.cardNames ? `<div class="meta">🔗 Karten: ${u.cardNames}</div>` : ''}
-          ${u.note ? `<div class="meta">📝 ${u.note}</div>` : ''}
+    return `<div class="uptrip-card">
+      <div class="uptrip-card-top">
+        <div class="ring-wrap">
+          <svg viewBox="0 0 100 100">
+            <circle class="ring-bg" cx="50" cy="50" r="${RING_R}"></circle>
+            <circle class="ring-fg ${complete ? 'complete' : ''}" cx="50" cy="50" r="${RING_R}" stroke-dasharray="${RING_C}" stroke-dashoffset="${offset}"></circle>
+          </svg>
+          <div class="ring-label">${have}/${needed}</div>
         </div>
-        <div class="pts">${statusHtml}</div>
+        <div class="uptrip-card-title">
+          <div class="name">${u.name}</div>
+          <div class="reward">${rewardText}</div>
+        </div>
       </div>
-      <div class="bar-bg" style="margin-top:8px;"><div class="bar-fill q" style="width:${pct}%"></div></div>
-      <div class="flex-between" style="margin-top:6px;">
-        <div>
-          <button class="del" onclick="deleteUptrip(${idx})">entfernen</button>
-          ${u.redeemed ? `<button class="del" style="color:var(--muted); margin-left:10px;" onclick="undoUptrip(${idx})">Einlösung rückgängig</button>` : ''}
-        </div>
-        ${!u.redeemed ? `<div>
-          <button class="btn small secondary" onclick="adjustUptripCard(${idx}, -1)" ${u.have <= 0 ? 'disabled' : ''}>−1 Karte</button>
-          <button class="btn small" onclick="adjustUptripCard(${idx}, 1)" ${u.have >= u.needed ? 'disabled' : ''} style="margin-left:6px;">+1 Karte</button>
-        </div>` : ''}
+      <div class="uptrip-row">
+        <span>🔁 Einlösungen</span><span>${redemptionCount}/${maxRedemptions}</span>
+      </div>
+      ${origNeeded > 0 ? `<div class="uptrip-row ${origSatisfied ? 'ok' : 'warn'}">
+        <span>✈️ Min. ${origNeeded} Original-Karten</span><span>${origHave}/${origNeeded} ${origSatisfied ? '✅' : '⚠️'}</span>
+      </div>` : ''}
+      ${u.cardNames ? `<div class="meta-line">🔗 Karten: ${u.cardNames}</div>` : ''}
+      ${u.note ? `<div class="meta-line">📝 ${u.note}</div>` : ''}
+      <div class="actions">
+        <div>${actionHtml}</div>
+        ${!limitReached ? `<div>
+          <button class="btn small secondary" onclick="adjustUptripCard(${idx}, -1)" ${have <= 0 ? 'disabled' : ''}>−1</button>
+          <button class="btn small" onclick="adjustUptripCard(${idx}, 1)" ${have >= needed ? 'disabled' : ''} style="margin-left:6px;">+1 Karte</button>
+        </div>` : '<div></div>'}
+      </div>
+      <div class="flex-between" style="margin-top:8px;">
+        <button class="del" onclick="deleteUptrip(${idx})">entfernen</button>
+        ${redemptionCount > 0 ? `<button class="del" onclick="undoUptrip(${idx})">letzte Einlösung rückgängig</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -451,7 +475,7 @@ window.deleteUptrip = async function(idx) { uptripItems.splice(idx, 1); await sa
 
 window.adjustUptripCard = async function(idx, delta) {
   const u = uptripItems[idx];
-  if (!u || u.redeemed) return;
+  if (!u || (u.redemptionCount || 0) >= (u.maxRedemptions || 1)) return;
   u.have = Math.max(0, Math.min(u.needed, u.have + delta));
   uptripItems[idx] = u;
   await saveUptrip();
@@ -460,17 +484,23 @@ window.adjustUptripCard = async function(idx, delta) {
 
 window.redeemUptrip = async function(idx) {
   const u = uptripItems[idx];
-  if (!u || u.redeemed) return;
+  if (!u) return;
+  const maxRedemptions = u.maxRedemptions || 1;
+  const redemptionCount = u.redemptionCount || 0;
+  if (redemptionCount >= maxRedemptions) return;
+
   const parts = [];
   if (u.rewardPoints) parts.push(`+${u.rewardPoints} Points`);
   if (u.rewardQP) parts.push(`+${u.rewardQP} Qualifying Points`);
   if (u.rewardMeilen) parts.push(`+${u.rewardMeilen} Meilen`);
   if (u.rewardOther) parts.push(u.rewardOther);
-  const msg = `"${u.name}" einlösen?\n\nDu erhältst:\n${parts.join('\n') || '(keine numerische Prämie hinterlegt)'}\n\nDas wird sofort zu deinem Dashboard addiert.${u.cardNames ? '\nVerknüpfte Karten werden aus dem Inventar abgezogen: ' + u.cardNames : ''}`;
+  const msg = `"${u.name}" einlösen (${redemptionCount + 1}/${maxRedemptions})?\n\nDu erhältst:\n${parts.join('\n') || '(keine numerische Prämie hinterlegt)'}\n\nDas wird sofort zu deinem Dashboard addiert.${u.cardNames ? '\nVerknüpfte Karten werden aus dem Inventar abgezogen: ' + u.cardNames : ''}`;
   if (!confirm(msg)) return;
 
-  u.redeemed = true;
+  u.redemptionCount = redemptionCount + 1;
   u.redeemedDate = new Date().toISOString().slice(0, 10);
+  u.have = 0;
+  u.origHave = 0;
 
   if (u.cardNames) {
     const names = u.cardNames.split(',').map(s => s.trim()).filter(Boolean);
@@ -491,10 +521,11 @@ window.redeemUptrip = async function(idx) {
 
 window.undoUptrip = async function(idx) {
   const u = uptripItems[idx];
-  if (!u || !u.redeemed) return;
-  if (!confirm(`Einlösung von "${u.name}" rückgängig machen? Die Points/QP/Meilen werden aus dem Dashboard wieder abgezogen. Hinweis: bereits abgezogene Inventar-Karten werden dabei NICHT automatisch zurückgebucht — die musst du manuell im Karteninventar korrigieren.`)) return;
-  u.redeemed = false;
-  u.redeemedDate = null;
+  if (!u || !(u.redemptionCount > 0)) return;
+  if (!confirm(`Letzte Einlösung von "${u.name}" rückgängig machen? Die Points/QP/Meilen dieser Einlösung werden aus dem Dashboard wieder abgezogen, die Karten gelten wieder als vollständig vorhanden. Hinweis: bereits abgezogene Inventar-Karten werden dabei NICHT automatisch zurückgebucht — die musst du manuell im Karteninventar korrigieren.`)) return;
+  u.redemptionCount -= 1;
+  u.have = u.needed;
+  u.origHave = u.origNeeded || 0;
   uptripItems[idx] = u;
   await saveUptrip();
   render();
@@ -624,6 +655,7 @@ document.getElementById('uptrip-form').addEventListener('submit', async (e) => {
   const have = parseInt(document.getElementById('up-have').value) || 0;
   const origNeeded = parseInt(document.getElementById('up-orig-needed').value) || 0;
   const origHave = parseInt(document.getElementById('up-orig-have').value) || 0;
+  const maxRedemptions = parseInt(document.getElementById('up-max-redemptions').value) || 1;
   const rewardPoints = parseInt(document.getElementById('up-reward-p').value) || 0;
   const rewardQP = parseInt(document.getElementById('up-reward-q').value) || 0;
   const rewardMeilen = parseInt(document.getElementById('up-reward-m').value) || 0;
@@ -633,8 +665,8 @@ document.getElementById('uptrip-form').addEventListener('submit', async (e) => {
   const existingIdx = uptripItems.findIndex(u => u.name.toLowerCase() === name.toLowerCase());
   const existing = existingIdx >= 0 ? uptripItems[existingIdx] : null;
   const item = {
-    name, needed, have, origNeeded, origHave, rewardPoints, rewardQP, rewardMeilen, rewardOther, cardNames, note,
-    redeemed: existing ? existing.redeemed : false,
+    name, needed, have, origNeeded, origHave, maxRedemptions, rewardPoints, rewardQP, rewardMeilen, rewardOther, cardNames, note,
+    redemptionCount: existing ? (existing.redemptionCount || 0) : 0,
     redeemedDate: existing ? existing.redeemedDate : null
   };
   if (existingIdx >= 0) uptripItems[existingIdx] = item;
