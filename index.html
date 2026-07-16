@@ -95,6 +95,21 @@
     </div>
 
     <div class="card">
+      <h2>🏆 Quartals-Tracker Senator 2027</h2>
+      <p class="hint" id="senator-status-line" style="margin-top:0;"></p>
+      <div id="senator-quarters"></div>
+      <form id="senator-ground-form" style="margin-top:14px;">
+        <label>Boden-Punkte 2027 (nicht im Trip-Log erfasst, z.B. Marriott, Kreditkarten-Tausch, Uptrip-Kollektionen)</label>
+        <div class="row2">
+          <div><label style="margin-top:0;">Points</label><input type="number" id="senator-ground-points" min="0" value="0"></div>
+          <div><label style="margin-top:0;">Qualifying Points</label><input type="number" id="senator-ground-qp" min="0" value="0"></div>
+        </div>
+        <button type="submit" class="btn secondary">Boden-Punkte speichern</button>
+      </form>
+      <p class="hint">Leitgröße ist <b>Points</b> (2.000-Ziel) — QP läuft nur als sekundärer Sicherheits-Check mit, da bei Lufthansa-Group-Flügen beide Currencies gleichzeitig vergeben werden.</p>
+    </div>
+
+    <div class="card">
       <h2>⏰ Fristen & Ablaufdaten <span class="badge" id="fristen-count">0</span></h2>
       <div id="fristen-list"><div class="empty">Keine Fristen erfasst.</div></div>
       <form id="fristen-form" style="margin-top:10px;">

@@ -7,6 +7,7 @@ const KEY_INVENTORY = 'uptrip-inventory';
 const KEY_VALUECALC = 'value-log';
 const KEY_UPGRADES = 'upgrades';
 const KEY_MARKETPLACE = 'marketplace';
+const KEY_SENATOR_GROUND = 'senator-ground';
 
 let baseline = { p: 0, q: 0, m: 0 };
 let trips = [];
@@ -17,6 +18,15 @@ let inventory = [];
 let valueLog = [];
 let upgrades = [];
 let marketplace = [];
+let senatorGround = { points: 0, qp: 0 };
+
+const SENATOR_YEAR = 2027;
+const SENATOR_QUARTERS = [
+  { label: 'Q1 (Jan–Mär)', points: 500, qp: 250 },
+  { label: 'Q2 (Apr–Jun)', points: 1000, qp: 500 },
+  { label: 'Q3 (Jul–Sep)', points: 1500, qp: 750 },
+  { label: 'Q4 (Okt–Dez)', points: 2000, qp: 1000 }
+];
 
 function pointsForSegment(range, cls) {
   const table = {
@@ -52,6 +62,16 @@ function computeTotals() {
     m += (u.rewardMeilen || 0) * times;
   });
   return { p, q, m };
+}
+
+function senatorYearTotals() {
+  const tripSum = trips
+    .filter(t => t.date && t.date.startsWith(String(SENATOR_YEAR)))
+    .reduce((s, t) => s + tripPoints(t), 0);
+  return {
+    points: tripSum + (senatorGround.points || 0),
+    qp: tripSum + (senatorGround.qp || 0)
+  };
 }
 
 function labelClass(c) {
@@ -183,6 +203,7 @@ function render() {
   bar('gsen-bar-p', totals.p, 2000);
   bar('gsen-bar-q', totals.q, 1000);
 
+  renderSenatorTracker();
   renderTrips();
   renderPromos();
   renderUptrip();
@@ -191,6 +212,50 @@ function render() {
   renderCalc();
   renderUpgrades();
   renderMarketplace();
+}
+
+function renderSenatorTracker() {
+  const totals = senatorYearTotals();
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  let currentQuarterIdx = null;
+  let yearStateText = '';
+  if (currentYear < SENATOR_YEAR) {
+    yearStateText = ` — noch ${SENATOR_YEAR} (Tracking startet am 1.1.${SENATOR_YEAR})`;
+  } else if (currentYear > SENATOR_YEAR) {
+    yearStateText = ` — Jahr ${SENATOR_YEAR} vorbei`;
+  } else {
+    currentQuarterIdx = Math.floor(now.getMonth() / 3);
+  }
+
+  document.getElementById('senator-status-line').textContent =
+    `Aktueller Stand ${SENATOR_YEAR}: ${totals.points.toLocaleString('de-DE')} Points · ${totals.qp.toLocaleString('de-DE')} QP${yearStateText}`;
+
+  document.getElementById('senator-quarters').innerHTML = SENATOR_QUARTERS.map((q, idx) => {
+    const isCurrent = currentQuarterIdx === idx;
+    const isDue = currentQuarterIdx !== null && idx <= currentQuarterIdx;
+
+    let statusClass = '';
+    let statusText = 'noch nicht dran';
+    if (isDue) {
+      const shortfall = q.points - totals.points;
+      if (shortfall <= 0) { statusClass = 'ok'; statusText = '✅ im Soll'; }
+      else if (shortfall <= q.points * 0.15) { statusClass = 'mid'; statusText = `⚠️ knapp dahinter (−${shortfall.toLocaleString('de-DE')} Points)`; }
+      else { statusClass = 'low'; statusText = `🔴 deutlich hinten (−${shortfall.toLocaleString('de-DE')} Points)`; }
+    }
+    const qpOk = totals.qp >= q.qp;
+
+    return `<div class="quarter-row ${isCurrent ? 'current' : ''} ${statusClass}">
+      <div>
+        <div class="qlabel">${q.label}${isCurrent ? ' 👉' : ''}</div>
+        <div class="qtarget">Ziel: ${q.points.toLocaleString('de-DE')} P / ${q.qp.toLocaleString('de-DE')} QP</div>
+      </div>
+      <div>
+        <div class="qstatus">${statusText}</div>
+        <div class="qqp">QP: ${totals.qp.toLocaleString('de-DE')} / ${q.qp.toLocaleString('de-DE')} ${isDue ? (qpOk ? '✓' : '⚠️') : ''}</div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function renderTrips() {
@@ -531,6 +596,7 @@ async function saveInventory() { await DB.set(KEY_INVENTORY, inventory); }
 async function saveValueLog() { await DB.set(KEY_VALUECALC, valueLog); }
 async function saveUpgrades() { await DB.set(KEY_UPGRADES, upgrades); }
 async function saveMarketplace() { await DB.set(KEY_MARKETPLACE, marketplace); }
+async function saveSenatorGround() { await DB.set(KEY_SENATOR_GROUND, senatorGround); }
 
 async function loadAll() {
   baseline = await DB.get(KEY_BASE, baseline);
@@ -542,6 +608,7 @@ async function loadAll() {
   valueLog = await DB.get(KEY_VALUECALC, []);
   upgrades = await DB.get(KEY_UPGRADES, []);
   marketplace = await DB.get(KEY_MARKETPLACE, []);
+  senatorGround = await DB.get(KEY_SENATOR_GROUND, senatorGround);
 
   let inventoryMigrated = false;
   inventory.forEach(i => { if (!i.id) { i.id = genId(); inventoryMigrated = true; } });
@@ -553,6 +620,8 @@ async function loadAll() {
   document.getElementById('base-q').value = baseline.q;
   document.getElementById('base-m').value = baseline.m;
   document.getElementById('base-note').value = baseline.note || '';
+  document.getElementById('senator-ground-points').value = senatorGround.points || 0;
+  document.getElementById('senator-ground-qp').value = senatorGround.qp || 0;
   document.getElementById('loading-tag').style.display = 'none';
 
   render();
@@ -657,6 +726,16 @@ document.getElementById('baseline-form').addEventListener('submit', async (e) =>
     note: document.getElementById('base-note').value
   };
   await saveBaseline();
+  render();
+});
+
+document.getElementById('senator-ground-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  senatorGround = {
+    points: parseInt(document.getElementById('senator-ground-points').value) || 0,
+    qp: parseInt(document.getElementById('senator-ground-qp').value) || 0
+  };
+  await saveSenatorGround();
   render();
 });
 
