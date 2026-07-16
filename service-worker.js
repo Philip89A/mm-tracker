@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mm-tracker-v5';
+const CACHE_NAME = 'mm-tracker-v6';
 const APP_SHELL = [
   './',
   './index.html',
@@ -17,7 +17,12 @@ const APP_SHELL = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME).then((cache) =>
+      // {cache: 'reload'} bypasses the browser's own HTTP cache, otherwise
+      // a stale heuristically-cached response (Python's http.server sends no
+      // explicit Cache-Control headers) can get locked into the SW cache.
+      Promise.all(APP_SHELL.map((url) => cache.add(new Request(url, { cache: 'reload' }))))
+    )
   );
   self.skipWaiting();
 });
@@ -40,9 +45,11 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
 
   // Network-first: always prefer a fresh response so app updates show up
-  // immediately; only fall back to the cache when offline.
+  // immediately; only fall back to the cache when offline. cache:'no-store'
+  // is essential here — plain fetch() still honors the browser's ordinary
+  // HTTP cache/heuristic freshness, which defeats "network-first" silently.
   event.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-store' })
       .then((res) => {
         if (res && res.ok) {
           caches.open(CACHE_NAME).then((cache) => cache.put(req, res.clone()));

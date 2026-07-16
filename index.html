@@ -123,9 +123,12 @@
         </div>
         <label>Meilen-Pool (aktuell)</label>
         <input type="number" id="base-m" value="0">
+        <label>Notiz (optional, z.B. was im Basiswert steckt)</label>
+        <input type="text" id="base-note" placeholder="z.B. 40 P Marriott + 35 P/QP Kulanzgutschrift M&amp;M">
         <button type="submit" class="btn secondary">Basiswerte speichern / aktualisieren</button>
       </form>
       <p class="hint">Aktualisiere diese Werte, sobald du einen neuen Screenshot aus der App hast — Trips, Uptrip-Einlösungen etc. werden automatisch draufgerechnet.</p>
+      <p class="hint" id="base-note-display" style="display:none;"></p>
     </div>
 
   </section>
@@ -173,8 +176,8 @@
             <label>CO₂-Kompensation?</label>
             <select id="t-co2">
               <option value="0">Nein</option>
-              <option value="30">Ja, ~30% Bonus (Standard)</option>
-              <option value="80">Ja, ~80% Bonus (Maximalpaket)</option>
+              <option value="30">Ja, ~30% Bonus</option>
+              <option value="80" selected>Ja, ~80% Bonus (Maximalpaket, Standard)</option>
             </select>
           </div>
         </div>

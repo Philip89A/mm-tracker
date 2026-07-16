@@ -161,6 +161,14 @@ function render() {
   document.getElementById('stat-q').textContent = totals.q.toLocaleString('de-DE');
   document.getElementById('stat-m').textContent = totals.m.toLocaleString('de-DE');
 
+  const baseNoteEl = document.getElementById('base-note-display');
+  if (baseline.note) {
+    baseNoteEl.textContent = '📝 Basiswert enthält: ' + baseline.note;
+    baseNoteEl.style.display = 'block';
+  } else {
+    baseNoteEl.style.display = 'none';
+  }
+
   document.getElementById('g700-val').textContent = totals.q.toLocaleString('de-DE') + ' / 700 QP';
   bar('g700-bar', totals.q, 700);
   const remaining700 = Math.max(0, 700 - totals.q);
@@ -544,6 +552,7 @@ async function loadAll() {
   document.getElementById('base-p').value = baseline.p;
   document.getElementById('base-q').value = baseline.q;
   document.getElementById('base-m').value = baseline.m;
+  document.getElementById('base-note').value = baseline.note || '';
   document.getElementById('loading-tag').style.display = 'none';
 
   render();
@@ -644,7 +653,8 @@ document.getElementById('baseline-form').addEventListener('submit', async (e) =>
   baseline = {
     p: parseInt(document.getElementById('base-p').value) || 0,
     q: parseInt(document.getElementById('base-q').value) || 0,
-    m: parseInt(document.getElementById('base-m').value) || 0
+    m: parseInt(document.getElementById('base-m').value) || 0,
+    note: document.getElementById('base-note').value
   };
   await saveBaseline();
   render();
