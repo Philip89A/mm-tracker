@@ -378,9 +378,15 @@
           <div><label>Kosten (€)</label><input type="number" id="c-cost" step="0.01" min="0" required></div>
         </div>
         <div class="row2">
-          <div><label>Points gewonnen</label><input type="number" id="c-points" min="0" required></div>
-          <div><label>QP gewonnen</label><input type="number" id="c-qp" min="0" required></div>
+          <div><label>Points gewonnen (Basis, ohne CO₂-Bonus)</label><input type="number" id="c-points" min="0" required></div>
+          <div><label>QP gewonnen (Basis, ohne CO₂-Bonus)</label><input type="number" id="c-qp" min="0" required></div>
         </div>
+        <label>CO₂-Kompensation?</label>
+        <select id="c-co2">
+          <option value="0">Nein</option>
+          <option value="30">Ja, ~30% Bonus</option>
+          <option value="80">Ja, ~80% Bonus (Maximalpaket)</option>
+        </select>
         <label>Notiz</label>
         <input type="text" id="c-note" placeholder="z.B. FRA-FCO Festpreis-Upgrade">
         <button type="submit" class="btn secondary">Berechnen & speichern</button>

@@ -394,18 +394,23 @@ function renderCalc() {
     list.innerHTML = '<div class="empty">Noch keine Berechnungen gespeichert.</div>';
     return;
   }
-  const withRates = valueLog.map((c, idx) => ({
-    ...c, idx,
-    perPoint: c.points > 0 ? c.cost / c.points : null,
-    perQP: c.qp > 0 ? c.cost / c.qp : null
-  }));
+  const withRates = valueLog.map((c, idx) => {
+    const co2 = c.co2 || 0;
+    const totalPoints = c.points + Math.round(c.points * co2 / 100);
+    const totalQp = c.qp + Math.round(c.qp * co2 / 100);
+    return {
+      ...c, idx, totalPoints, totalQp,
+      perPoint: totalPoints > 0 ? c.cost / totalPoints : null,
+      perQP: totalQp > 0 ? c.cost / totalQp : null
+    };
+  });
   const sorted = [...withRates].sort((a, b) => (a.perQP ?? Infinity) - (b.perQP ?? Infinity));
   const bestIdx = sorted.length ? sorted[0].idx : null;
   list.innerHTML = sorted.map(c => `<div class="trip">
     <div class="top">
       <div>
         <div class="route">${c.type} ${c.idx === bestIdx ? '🏆' : ''}</div>
-        <div class="meta">${c.cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} € · ${c.points} P · ${c.qp} QP</div>
+        <div class="meta">${c.cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} € · ${c.totalPoints} P · ${c.totalQp} QP${c.co2 > 0 ? ' (inkl. CO₂ +' + c.co2 + '%)' : ''}</div>
         ${c.note ? `<div class="meta">📝 ${c.note}</div>` : ''}
       </div>
       <div class="pts">
@@ -820,6 +825,7 @@ document.getElementById('calc-form').addEventListener('submit', async (e) => {
     cost: parseFloat(document.getElementById('c-cost').value) || 0,
     points: parseInt(document.getElementById('c-points').value) || 0,
     qp: parseInt(document.getElementById('c-qp').value) || 0,
+    co2: parseInt(document.getElementById('c-co2').value) || 0,
     note: document.getElementById('c-note').value
   });
   await saveValueLog();
