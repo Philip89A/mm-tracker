@@ -28,6 +28,14 @@ const SENATOR_QUARTERS = [
   { label: 'Q4 (Okt–Dez)', points: 2000, qp: 1000 }
 ];
 
+const EVOUCHER_YEAR = 2026;
+const EVOUCHER_QUARTERS = [
+  { label: 'Q1 (Jan–Mär)', qp: 175 },
+  { label: 'Q2 (Apr–Jun)', qp: 350 },
+  { label: 'Q3 (Jul–Sep)', qp: 525 },
+  { label: 'Q4 (Okt–Dez)', qp: 700 }
+];
+
 function pointsForSegment(range, cls) {
   const table = {
     continental: { economy: 20, premium: 20, business: 40, first: 40 },
@@ -203,6 +211,7 @@ function render() {
   bar('gsen-bar-p', totals.p, 2000);
   bar('gsen-bar-q', totals.q, 1000);
 
+  renderEvoucherTracker();
   renderSenatorTracker();
   renderTrips();
   renderPromos();
@@ -212,6 +221,47 @@ function render() {
   renderCalc();
   renderUpgrades();
   renderMarketplace();
+}
+
+function renderEvoucherTracker() {
+  const totals = computeTotals();
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  let currentQuarterIdx = null;
+  let yearStateText = '';
+  if (currentYear < EVOUCHER_YEAR) {
+    yearStateText = ` — noch ${EVOUCHER_YEAR} (Tracking startet am 1.1.${EVOUCHER_YEAR})`;
+  } else if (currentYear > EVOUCHER_YEAR) {
+    yearStateText = ` — Jahr ${EVOUCHER_YEAR} vorbei`;
+  } else {
+    currentQuarterIdx = Math.floor(now.getMonth() / 3);
+  }
+
+  document.getElementById('evoucher-status-line').textContent =
+    `Aktueller Stand ${EVOUCHER_YEAR}: ${totals.q.toLocaleString('de-DE')} QP${yearStateText}`;
+
+  document.getElementById('evoucher-quarters').innerHTML = EVOUCHER_QUARTERS.map((q, idx) => {
+    const isCurrent = currentQuarterIdx === idx;
+
+    // Anders als beim Senator-Tracker werden hier alle vier Quartale bewertet
+    // (nicht nur bereits laufende), da 2026 schon läuft und bereits geplante
+    // Flüge fürs restliche Jahr im Trip-Log stehen.
+    let statusClass, statusText;
+    const shortfall = q.qp - totals.q;
+    if (shortfall <= 0) { statusClass = 'ok'; statusText = '✅ im Soll'; }
+    else if (shortfall <= q.qp * 0.15) { statusClass = 'mid'; statusText = `⚠️ knapp dahinter (−${shortfall.toLocaleString('de-DE')} QP)`; }
+    else { statusClass = 'low'; statusText = `🔴 deutlich hinten (−${shortfall.toLocaleString('de-DE')} QP)`; }
+
+    return `<div class="quarter-row ${isCurrent ? 'current' : ''} ${statusClass}">
+      <div>
+        <div class="qlabel">${q.label}${isCurrent ? ' 👉' : ''}</div>
+        <div class="qtarget">Ziel: ${q.qp.toLocaleString('de-DE')} QP</div>
+      </div>
+      <div>
+        <div class="qstatus">${statusText}</div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function renderSenatorTracker() {
