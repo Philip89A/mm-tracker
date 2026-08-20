@@ -19,6 +19,7 @@ let valueLog = [];
 let upgrades = [];
 let marketplace = [];
 let senatorGround = { points: 0, qp: 0 };
+let pendingReceivedCards = []; // staged "erhaltene Karte(n)" for the marketplace form, not persisted directly
 
 const SENATOR_YEAR = 2027;
 const SENATOR_QUARTERS = [
@@ -97,30 +98,6 @@ function daysUntil(dateStr) {
   return Math.ceil((d - now) / (1000 * 60 * 60 * 24));
 }
 
-function parseCardList(str) {
-  if (!str) return [];
-  return str.split(',').map(s => s.trim()).filter(Boolean).map(part => {
-    const [name, countStr] = part.split(':').map(x => x.trim());
-    return { name, count: parseInt(countStr) || 1 };
-  });
-}
-
-function applyCardDelta(name, delta) {
-  // delta negative = remove from inventory, positive = add
-  let inv = inventory.find(i => i.name.toLowerCase() === name.toLowerCase() && i.status !== 'eingeloest');
-  if (delta < 0) {
-    if (inv) {
-      inv.count += delta;
-      if (inv.count <= 0) { inv.status = 'eingeloest'; inv.count = 0; }
-    }
-  } else {
-    if (inv) {
-      inv.count += delta;
-    } else {
-      inventory.push({ id: genId(), name, count: delta, status: 'neu', cost: 0, note: 'aus Tausch/Mixer erhalten' });
-    }
-  }
-}
 
 function genId() {
   return 'inv_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
@@ -612,7 +589,57 @@ function renderUptrip() {
   }).join('');
 }
 
+function renderMpGivenSelect() {
+  const select = document.getElementById('mp-given-select');
+  const previouslySelected = new Set(Array.from(select.selectedOptions).map(o => o.value));
+
+  const available = inventory.filter(i => i.status === 'neu' && i.count > 0);
+  select.innerHTML = available.map(i =>
+    `<option value="${i.id}" ${previouslySelected.has(i.id) ? 'selected' : ''}>${i.name} (${i.count}x vorhanden)</option>`
+  ).join('');
+
+  renderMpQtyRows();
+}
+
+function renderMpQtyRows() {
+  const select = document.getElementById('mp-given-select');
+  const rows = document.getElementById('mp-given-qty-rows');
+  const selected = Array.from(select.selectedOptions);
+
+  // Keep any already-entered quantities when the row set changes.
+  const existingQty = {};
+  rows.querySelectorAll('input[data-inv-id]').forEach(inp => { existingQty[inp.dataset.invId] = inp.value; });
+
+  rows.innerHTML = selected.map(opt => {
+    const inv = inventory.find(i => i.id === opt.value);
+    const max = inv ? inv.count : 1;
+    const val = existingQty[opt.value] || 1;
+    return `<div class="qty-row">
+      <label>${inv ? inv.name : opt.textContent}</label>
+      <input type="number" data-inv-id="${opt.value}" min="1" max="${max}" value="${val}">
+    </div>`;
+  }).join('');
+}
+
+function renderMpReceivedList() {
+  const list = document.getElementById('mp-received-list');
+  if (pendingReceivedCards.length === 0) {
+    list.innerHTML = '';
+    return;
+  }
+  list.innerHTML = pendingReceivedCards.map((c, idx) => `<div class="pending-row">
+    <span>${c.name}${c.count > 1 ? ' ×' + c.count : ''}${c.cardType ? ' · ' + (cardTypeLabel[c.cardType] || c.cardType) : ''}</span>
+    <button type="button" class="del" onclick="removePendingReceivedCard(${idx})">entfernen</button>
+  </div>`).join('');
+}
+
+window.removePendingReceivedCard = function(idx) {
+  pendingReceivedCards.splice(idx, 1);
+  renderMpReceivedList();
+};
+
 function renderMarketplace() {
+  renderMpGivenSelect();
   const list = document.getElementById('mp-list');
   document.getElementById('mp-count').textContent = marketplace.length;
   const totalCost = marketplace.reduce((s, m) => s + (parseFloat(m.cost) || 0), 0);
@@ -626,11 +653,13 @@ function renderMarketplace() {
   const sorted = [...marketplace].sort((a, b) => new Date(b.date) - new Date(a.date));
   list.innerHTML = sorted.map(m => {
     const idx = marketplace.indexOf(m);
+    const givenText = formatCardList(m.given);
+    const receivedText = formatCardList(m.received);
     return `<div class="trip">
       <div class="top">
         <div>
           <div class="route">${m.type}${m.ratio ? ' · ' + m.ratio : ''}</div>
-          <div class="meta">${m.date} · abgegeben: ${m.given || '–'} · erhalten: ${m.received || '–'}</div>
+          <div class="meta">${m.date} · abgegeben: ${givenText} · erhalten: ${receivedText}</div>
           ${m.note ? `<div class="meta">📝 ${m.note}</div>` : ''}
         </div>
         <div class="pts"><div class="p">${parseFloat(m.cost).toLocaleString('de-DE', {minimumFractionDigits: 2})} €</div></div>
@@ -638,6 +667,11 @@ function renderMarketplace() {
       <button class="del" onclick="deleteMarketplace(${idx})">entfernen</button>
     </div>`;
   }).join('');
+}
+
+function formatCardList(arr) {
+  if (!arr || arr.length === 0) return '–';
+  return arr.map(c => c.name + (c.count > 1 ? ' ×' + c.count : '')).join(', ');
 }
 
 // ---------- persistence ----------
@@ -927,27 +961,97 @@ document.getElementById('uptrip-form').addEventListener('submit', async (e) => {
   render();
 });
 
+document.getElementById('mp-given-select').addEventListener('change', renderMpQtyRows);
+
+document.getElementById('mp-recv-type').addEventListener('change', () => {
+  const isAircraft = document.getElementById('mp-recv-type').value === 'aircraft';
+  document.getElementById('mp-recv-airline-wrap').style.display = isAircraft ? 'block' : 'none';
+});
+
+document.getElementById('mp-recv-add-btn').addEventListener('click', () => {
+  const name = document.getElementById('mp-recv-name').value.trim();
+  if (!name) { alert('Bitte einen Kartennamen eingeben.'); return; }
+  const cardType = document.getElementById('mp-recv-type').value;
+  pendingReceivedCards.push({
+    name,
+    count: parseInt(document.getElementById('mp-recv-qty').value) || 1,
+    cardType: cardType || null,
+    airline: cardType === 'aircraft' ? document.getElementById('mp-recv-airline').value : '',
+    original: document.getElementById('mp-recv-original').value === '1',
+    status: document.getElementById('mp-recv-status').value,
+    cost: parseFloat(document.getElementById('mp-recv-cost').value) || 0,
+    note: document.getElementById('mp-recv-note').value
+  });
+  renderMpReceivedList();
+
+  document.getElementById('mp-recv-name').value = '';
+  document.getElementById('mp-recv-qty').value = 1;
+  document.getElementById('mp-recv-type').value = '';
+  document.getElementById('mp-recv-original').value = '1';
+  document.getElementById('mp-recv-airline').value = '';
+  document.getElementById('mp-recv-airline-wrap').style.display = 'none';
+  document.getElementById('mp-recv-status').value = 'neu';
+  document.getElementById('mp-recv-cost').value = '';
+  document.getElementById('mp-recv-note').value = '';
+});
+
 document.getElementById('mp-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const given = document.getElementById('mp-given').value;
-  const received = document.getElementById('mp-received').value;
-  const entry = {
+
+  // Abgegebene Karten: direkt vom gewählten Inventar-Eintrag abziehen.
+  const givenRows = Array.from(document.querySelectorAll('#mp-given-qty-rows input[data-inv-id]'));
+  const given = [];
+  givenRows.forEach(row => {
+    const inv = inventory.find(i => i.id === row.dataset.invId);
+    if (!inv) return;
+    const qty = Math.max(1, Math.min(inv.count, parseInt(row.value) || 1));
+    given.push({ invId: inv.id, name: inv.name, count: qty });
+    inv.count -= qty;
+    if (inv.count <= 0) { inv.status = 'eingeloest'; inv.count = 0; }
+  });
+
+  // Erhaltene Karten: bestehenden passenden Eintrag erhöhen, sonst neu anlegen.
+  const received = pendingReceivedCards.map(c => ({ ...c }));
+  received.forEach(c => {
+    const existing = inventory.find(i =>
+      i.status !== 'eingeloest' &&
+      i.name.toLowerCase() === c.name.toLowerCase() &&
+      (i.cardType || null) === (c.cardType || null) &&
+      (i.airline || '') === (c.airline || '')
+    );
+    if (existing) {
+      existing.count += c.count;
+    } else {
+      inventory.push({
+        id: genId(),
+        name: c.name,
+        count: c.count,
+        cardType: c.cardType,
+        airline: c.airline,
+        original: c.original,
+        status: c.status,
+        cost: c.cost,
+        note: c.note || 'aus Tausch/Mixer erhalten'
+      });
+    }
+  });
+
+  await saveInventory();
+
+  marketplace.push({
     date: document.getElementById('mp-date').value,
     type: document.getElementById('mp-type').value,
     given, received,
     ratio: document.getElementById('mp-ratio').value,
     cost: parseFloat(document.getElementById('mp-cost').value) || 0,
     note: document.getElementById('mp-note').value
-  };
-
-  parseCardList(given).forEach(c => applyCardDelta(c.name, -c.count));
-  parseCardList(received).forEach(c => applyCardDelta(c.name, c.count));
-  await saveInventory();
-
-  marketplace.push(entry);
+  });
   await saveMarketplace();
+
+  pendingReceivedCards = [];
   e.target.reset();
   document.getElementById('mp-cost').value = '1.99';
+  document.getElementById('mp-given-qty-rows').innerHTML = '';
   render();
 });
 
