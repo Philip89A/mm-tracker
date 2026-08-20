@@ -205,6 +205,10 @@
         </div>
         <label>Notiz (optional)</label>
         <input type="text" id="t-note" placeholder="z.B. über MUC geroutet, Upgrade 140€">
+        <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:600; color:var(--text);">
+          <input type="checkbox" id="t-historical" style="width:auto;">
+          Historisch (zählt nicht in die aktuelle Gesamtsumme/Dashboard, nur im Jahresvergleich sichtbar)
+        </label>
         <button type="submit" class="btn">Trip speichern</button>
       </form>
       <div id="trip-preview" class="hint"></div>
@@ -516,6 +520,8 @@
             <label>Kategorie</label>
             <select id="mi-category">
               <option value="Flüge">Flüge</option>
+              <option value="Executive Meilen">Executive Meilen</option>
+              <option value="CO2-Kompensation">CO2-Kompensation (Klimabeitrag)</option>
               <option value="Kreditkarte">Kreditkarte</option>
               <option value="Hotel">Hotel</option>
               <option value="Mietwagen">Mietwagen</option>

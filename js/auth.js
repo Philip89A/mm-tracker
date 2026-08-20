@@ -23,6 +23,23 @@ function showApp() {
   document.getElementById('app-shell').style.display = 'block';
 }
 
+// Supabase fires onAuthStateChange for many events (SIGNED_IN, TOKEN_REFRESHED,
+// USER_UPDATED, ...), not just an actual login. TOKEN_REFRESHED in particular
+// happens automatically in the background roughly every hour. We must only
+// reload all data on a genuine new sign-in — otherwise a background token
+// refresh silently re-fetches everything from Supabase and can clobber a
+// change that was made moments earlier and hadn't finished syncing yet.
+let loadedForUserId = null;
+
+async function enterAppForSession(session) {
+  currentUserId = session.user.id;
+  showApp();
+  if (loadedForUserId !== currentUserId) {
+    loadedForUserId = currentUserId;
+    await loadAll();
+  }
+}
+
 async function initAuth() {
   if (!supabaseClient) {
     // No Supabase config at all — nothing we can authenticate against.
@@ -39,21 +56,18 @@ async function initAuth() {
     }
     if (event === 'SIGNED_OUT') {
       currentUserId = null;
+      loadedForUserId = null;
       showAuthScreen();
       return;
     }
     if (session) {
-      currentUserId = session.user.id;
-      showApp();
-      loadAll();
+      enterAppForSession(session);
     }
   });
 
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (session) {
-    currentUserId = session.user.id;
-    showApp();
-    loadAll();
+    await enterAppForSession(session);
   } else {
     showAuthScreen();
   }
@@ -102,9 +116,7 @@ document.getElementById('recovery-form').addEventListener('submit', async (e) =>
   alert('Passwort erfolgreich geändert.');
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (session) {
-    currentUserId = session.user.id;
-    showApp();
-    loadAll();
+    await enterAppForSession(session);
   }
 });
 

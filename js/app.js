@@ -25,7 +25,7 @@ let pendingReceivedCards = []; // staged "erhaltene Karte(n)" for the marketplac
 let milesLog = [];
 let redemptionIdeas = [];
 
-const MILES_CATEGORIES = ['Flüge', 'Kreditkarte', 'Hotel', 'Mietwagen', 'Fahrdienst', 'Shopping', 'Parken', 'Zeitschriften-Abo', 'Reise-Buchungsportale', 'Uptrip', 'Fremdprogramm-Umwandlung', 'Kulanz/Sonstiges'];
+const MILES_CATEGORIES = ['Flüge', 'Executive Meilen', 'CO2-Kompensation', 'Kreditkarte', 'Hotel', 'Mietwagen', 'Fahrdienst', 'Shopping', 'Parken', 'Zeitschriften-Abo', 'Reise-Buchungsportale', 'Uptrip', 'Fremdprogramm-Umwandlung', 'Kulanz/Sonstiges'];
 
 const SENATOR_YEAR = 2027;
 const SENATOR_QUARTERS = [
@@ -66,6 +66,7 @@ function segmentPointsWithCo2(range, cls, co2) {
 function computeTotals() {
   let p = baseline.p, q = baseline.q, m = baseline.m;
   trips.forEach(t => {
+    if (t.historical) return; // nachgetragene alte Flüge zählen bewusst nicht in die aktuelle Summe
     const total = tripPoints(t);
     p += total;
     q += total;
@@ -311,10 +312,11 @@ function renderTrips() {
         <div>
           <div class="route">${t.route}</div>
           <div class="meta">${t.date} · ${t.range === 'continental' ? 'Kontinental' : 'Interkont.'} · ${labelClass(t.cls)} · ${t.segments} Segm.${t.co2 > 0 ? ' · CO₂ +' + t.co2 + '%' : ''}</div>
+          ${t.historical ? `<div class="meta"><span class="tag mid">🕰️ Historisch — nicht in Gesamtsumme</span></div>` : ''}
           ${t.note ? `<div class="meta">📝 ${t.note}</div>` : ''}
         </div>
         <div class="pts">
-          <div class="p">+${total} P/QP</div>
+          <div class="p" style="${t.historical ? 'opacity:0.5; text-decoration:line-through;' : ''}">+${total} P/QP</div>
         </div>
       </div>
       <button class="del" onclick="deleteTrip(${idx})">entfernen</button>
@@ -1001,7 +1003,8 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     cls: document.getElementById('t-class').value,
     segments: parseInt(document.getElementById('t-segments').value) || 1,
     co2: parseInt(document.getElementById('t-co2').value) || 0,
-    note: document.getElementById('t-note').value
+    note: document.getElementById('t-note').value,
+    historical: document.getElementById('t-historical').checked
   };
   trips.push(trip);
   await saveTrips();
