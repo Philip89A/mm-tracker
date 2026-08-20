@@ -171,6 +171,18 @@ th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: upp
 .qty-row label { margin: 0; flex: 1; color: var(--text); font-weight: 500; }
 .qty-row input { width: 70px; flex: none; }
 
+.year-chart { display: flex; align-items: flex-end; gap: 20px; overflow-x: auto; padding: 24px 4px 0; min-height: 170px; }
+.year-col { display: flex; flex-direction: column; align-items: center; flex: 0 0 auto; }
+.year-bars { display: flex; align-items: flex-end; gap: 4px; height: 140px; }
+.year-bar { width: 22px; border-radius: 4px 4px 0 0; position: relative; min-height: 2px; }
+.year-bar.p { background: linear-gradient(180deg, var(--gold-light), var(--gold)); }
+.year-bar.q { background: linear-gradient(180deg, #6fa8dc, var(--navy2)); }
+.year-bar-val { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 700; color: var(--navy); white-space: nowrap; }
+.year-label { margin-top: 6px; font-size: 12px; font-weight: 700; color: var(--navy); }
+.year-legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); margin-top: 10px; }
+.year-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.year-legend .dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
 .uptrip-card {
   background: linear-gradient(160deg, var(--navy), var(--navy2));
   border-radius: 14px;

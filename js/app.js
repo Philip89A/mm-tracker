@@ -9,6 +9,7 @@ const KEY_UPGRADES = 'upgrades';
 const KEY_MARKETPLACE = 'marketplace';
 const KEY_SENATOR_GROUND = 'senator-ground';
 const KEY_MILES_LOG = 'miles-log';
+const KEY_REDEMPTION_IDEAS = 'redemption-ideas';
 
 let baseline = { p: 0, q: 0, m: 0 };
 let trips = [];
@@ -22,6 +23,7 @@ let marketplace = [];
 let senatorGround = { points: 0, qp: 0 };
 let pendingReceivedCards = []; // staged "erhaltene Karte(n)" for the marketplace form, not persisted directly
 let milesLog = [];
+let redemptionIdeas = [];
 
 const MILES_CATEGORIES = ['Flüge', 'Kreditkarte', 'Hotel', 'Mietwagen', 'Fahrdienst', 'Shopping', 'Parken', 'Zeitschriften-Abo', 'Reise-Buchungsportale', 'Uptrip', 'Fremdprogramm-Umwandlung', 'Kulanz/Sonstiges'];
 
@@ -196,6 +198,7 @@ function render() {
   renderEvoucherTracker();
   renderSenatorTracker();
   renderTrips();
+  renderYearChart();
   renderPromos();
   renderUptrip();
   renderFristen();
@@ -204,6 +207,7 @@ function render() {
   renderUpgrades();
   renderMarketplace();
   renderMiles();
+  renderRedemptionIdeas();
 }
 
 function renderEvoucherTracker() {
@@ -316,6 +320,50 @@ function renderTrips() {
       <button class="del" onclick="deleteTrip(${idx})">entfernen</button>
     </div>`;
   }).join('');
+}
+
+function renderYearChart() {
+  const el = document.getElementById('year-chart');
+  const byYear = {};
+  trips.forEach(t => {
+    if (!t.date) return;
+    const y = t.date.slice(0, 4);
+    const pts = tripPoints(t);
+    byYear[y] = byYear[y] || { p: 0, q: 0 };
+    byYear[y].p += pts;
+    byYear[y].q += pts;
+  });
+  if ((senatorGround.points || 0) > 0 || (senatorGround.qp || 0) > 0) {
+    const y = String(SENATOR_YEAR);
+    byYear[y] = byYear[y] || { p: 0, q: 0 };
+    byYear[y].p += senatorGround.points || 0;
+    byYear[y].q += senatorGround.qp || 0;
+  }
+
+  const years = Object.keys(byYear).sort();
+  if (years.length === 0) {
+    el.innerHTML = '<div class="empty">Noch keine Trips erfasst — das Diagramm erscheint, sobald Daten vorhanden sind.</div>';
+    return;
+  }
+  const maxVal = Math.max(1, ...years.map(y => Math.max(byYear[y].p, byYear[y].q)));
+
+  const cols = years.map(y => {
+    const pH = Math.max(2, Math.round((byYear[y].p / maxVal) * 140));
+    const qH = Math.max(2, Math.round((byYear[y].q / maxVal) * 140));
+    return `<div class="year-col">
+      <div class="year-bars">
+        <div class="year-bar p" style="height:${pH}px;"><span class="year-bar-val">${byYear[y].p.toLocaleString('de-DE')}</span></div>
+        <div class="year-bar q" style="height:${qH}px;"><span class="year-bar-val">${byYear[y].q.toLocaleString('de-DE')}</span></div>
+      </div>
+      <div class="year-label">${y}</div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `<div class="year-chart">${cols}</div>
+    <div class="year-legend">
+      <span><span class="dot" style="background:var(--gold);"></span>Points</span>
+      <span><span class="dot" style="background:var(--navy2);"></span>Qualifying Points</span>
+    </div>`;
 }
 
 function renderPromos() {
@@ -696,17 +744,24 @@ function renderMiles() {
         byCategory[mv.category].sources[mv.source] = (byCategory[mv.category].sources[mv.source] || 0) + mv.amount;
       }
     });
-    breakdownEl.innerHTML = MILES_CATEGORIES
+    // Nach Höhe sortiert (absteigend), damit auf einen Blick sichtbar ist,
+    // was am meisten Meilen gebracht hat.
+    const sortedCats = MILES_CATEGORIES
       .filter(cat => byCategory[cat])
+      .sort((a, b) => byCategory[b].total - byCategory[a].total);
+    const topCat = sortedCats.length && byCategory[sortedCats[0]].total > 0 ? sortedCats[0] : null;
+
+    breakdownEl.innerHTML = sortedCats
       .map(cat => {
         const data = byCategory[cat];
-        const sourceRows = Object.keys(data.sources).sort().map(src =>
+        const sortedSources = Object.keys(data.sources).sort((a, b) => data.sources[b] - data.sources[a]);
+        const sourceRows = sortedSources.map(src =>
           `<div class="flex-between" style="padding-left:14px; margin-top:3px; font-size:11.5px; color:var(--muted);">
             <span>↳ ${src}</span><span>${data.sources[src].toLocaleString('de-DE')}</span>
           </div>`
         ).join('');
         return `<div class="flex-between" style="margin-top:6px;">
-          <span style="font-weight:600; color:var(--navy);">${cat}</span>
+          <span style="font-weight:600; color:var(--navy);">${cat}${cat === topCat ? ' 🏆' : ''}</span>
           <span style="font-weight:700;">${data.total.toLocaleString('de-DE')} Meilen</span>
         </div>${sourceRows}`;
       }).join('');
@@ -756,6 +811,27 @@ function renderMiles() {
   </div>`).join('');
 }
 
+function renderRedemptionIdeas() {
+  document.getElementById('redemption-count').textContent = redemptionIdeas.length;
+  const list = document.getElementById('redemption-list');
+  if (redemptionIdeas.length === 0) {
+    list.innerHTML = '<div class="empty">Noch keine Einlöse-Ideen erfasst.</div>';
+    return;
+  }
+  const sorted = redemptionIdeas.map((r, idx) => ({ ...r, idx })).reverse();
+  list.innerHTML = sorted.map(r => `<div class="trip">
+    <div class="top">
+      <div>
+        <div class="route">${r.title}</div>
+        <div class="meta">${(r.miles || 0).toLocaleString('de-DE')} Meilen</div>
+        ${r.note ? `<div class="meta">📝 ${r.note}</div>` : ''}
+        ${r.link ? `<div class="meta"><a href="${r.link}" target="_blank" rel="noopener">🔗 Link öffnen</a></div>` : ''}
+      </div>
+    </div>
+    <button class="del" onclick="deleteRedemptionIdea(${r.idx})">entfernen</button>
+  </div>`).join('');
+}
+
 // ---------- persistence ----------
 
 async function saveBaseline() { await DB.set(KEY_BASE, baseline); }
@@ -769,6 +845,7 @@ async function saveUpgrades() { await DB.set(KEY_UPGRADES, upgrades); }
 async function saveMarketplace() { await DB.set(KEY_MARKETPLACE, marketplace); }
 async function saveSenatorGround() { await DB.set(KEY_SENATOR_GROUND, senatorGround); }
 async function saveMilesLog() { await DB.set(KEY_MILES_LOG, milesLog); }
+async function saveRedemptionIdeas() { await DB.set(KEY_REDEMPTION_IDEAS, redemptionIdeas); }
 
 async function loadAll() {
   baseline = await DB.get(KEY_BASE, baseline);
@@ -782,6 +859,7 @@ async function loadAll() {
   marketplace = await DB.get(KEY_MARKETPLACE, []);
   senatorGround = await DB.get(KEY_SENATOR_GROUND, senatorGround);
   milesLog = await DB.get(KEY_MILES_LOG, []);
+  redemptionIdeas = await DB.get(KEY_REDEMPTION_IDEAS, []);
 
   let inventoryMigrated = false;
   inventory.forEach(i => { if (!i.id) { i.id = genId(); inventoryMigrated = true; } });
@@ -811,6 +889,7 @@ window.deleteUpgrade = async function(idx) { upgrades.splice(idx, 1); await save
 window.deleteMarketplace = async function(idx) { marketplace.splice(idx, 1); await saveMarketplace(); render(); };
 window.deleteUptrip = async function(idx) { uptripItems.splice(idx, 1); await saveUptrip(); render(); };
 window.deleteMilesMovement = async function(idx) { milesLog.splice(idx, 1); await saveMilesLog(); render(); };
+window.deleteRedemptionIdea = async function(idx) { redemptionIdeas.splice(idx, 1); await saveRedemptionIdeas(); render(); };
 
 window.assignSelectedCards = async function(idx) {
   const select = document.getElementById(`assign-select-${idx}`);
@@ -1171,8 +1250,21 @@ document.getElementById('miles-form').addEventListener('submit', async (e) => {
   render();
 });
 
+document.getElementById('redemption-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  redemptionIdeas.push({
+    title: document.getElementById('ri-title').value,
+    miles: parseInt(document.getElementById('ri-miles').value) || 0,
+    link: document.getElementById('ri-link').value,
+    note: document.getElementById('ri-note').value
+  });
+  await saveRedemptionIdeas();
+  e.target.reset();
+  render();
+});
+
 document.getElementById('reset-btn').addEventListener('click', async () => {
-  if (!confirm('Wirklich alle Trips, Aktionen, Uptrip-Daten, Fristen, Marktplatz-Tausche, Meilen-Bewegungen und Berechnungen löschen? Basiswerte bleiben erhalten.')) return;
+  if (!confirm('Wirklich alle Trips, Aktionen, Uptrip-Daten, Fristen, Marktplatz-Tausche, Meilen-Bewegungen, Einlöse-Ideen und Berechnungen löschen? Basiswerte bleiben erhalten.')) return;
   trips = [];
   promos = [];
   uptripItems = [];
@@ -1182,6 +1274,7 @@ document.getElementById('reset-btn').addEventListener('click', async () => {
   upgrades = [];
   marketplace = [];
   milesLog = [];
+  redemptionIdeas = [];
   await saveTrips();
   await savePromos();
   await saveUptrip();
@@ -1191,6 +1284,7 @@ document.getElementById('reset-btn').addEventListener('click', async () => {
   await saveUpgrades();
   await saveMarketplace();
   await saveMilesLog();
+  await saveRedemptionIdeas();
   render();
 });
 
