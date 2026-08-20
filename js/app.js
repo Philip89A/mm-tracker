@@ -8,6 +8,7 @@ const KEY_VALUECALC = 'value-log';
 const KEY_UPGRADES = 'upgrades';
 const KEY_MARKETPLACE = 'marketplace';
 const KEY_SENATOR_GROUND = 'senator-ground';
+const KEY_MILES_LOG = 'miles-log';
 
 let baseline = { p: 0, q: 0, m: 0 };
 let trips = [];
@@ -20,6 +21,9 @@ let upgrades = [];
 let marketplace = [];
 let senatorGround = { points: 0, qp: 0 };
 let pendingReceivedCards = []; // staged "erhaltene Karte(n)" for the marketplace form, not persisted directly
+let milesLog = [];
+
+const MILES_CATEGORIES = ['Flüge', 'Kreditkarte', 'Hotel', 'Mietwagen', 'Fahrdienst', 'Shopping', 'Parken', 'Zeitschriften-Abo', 'Reise-Buchungsportale', 'Uptrip', 'Fremdprogramm-Umwandlung', 'Kulanz/Sonstiges'];
 
 const SENATOR_YEAR = 2027;
 const SENATOR_QUARTERS = [
@@ -70,6 +74,7 @@ function computeTotals() {
     q += (u.rewardQP || 0) * times;
     m += (u.rewardMeilen || 0) * times;
   });
+  milesLog.forEach(mv => { m += mv.amount || 0; });
   return { p, q, m };
 }
 
@@ -198,6 +203,7 @@ function render() {
   renderCalc();
   renderUpgrades();
   renderMarketplace();
+  renderMiles();
 }
 
 function renderEvoucherTracker() {
@@ -674,6 +680,82 @@ function formatCardList(arr) {
   return arr.map(c => c.name + (c.count > 1 ? ' ×' + c.count : '')).join(', ');
 }
 
+function renderMiles() {
+  document.getElementById('miles-count').textContent = milesLog.length;
+
+  // --- Aufschlüsselung nach Kategorie (immer über den gesamten Bestand, ungefiltert) ---
+  const breakdownEl = document.getElementById('miles-breakdown');
+  if (milesLog.length === 0) {
+    breakdownEl.innerHTML = '<div class="empty">Noch keine Meilen-Bewegungen erfasst.</div>';
+  } else {
+    const byCategory = {};
+    milesLog.forEach(mv => {
+      byCategory[mv.category] = byCategory[mv.category] || { total: 0, sources: {} };
+      byCategory[mv.category].total += mv.amount;
+      if (mv.category === 'Fremdprogramm-Umwandlung' && mv.source) {
+        byCategory[mv.category].sources[mv.source] = (byCategory[mv.category].sources[mv.source] || 0) + mv.amount;
+      }
+    });
+    breakdownEl.innerHTML = MILES_CATEGORIES
+      .filter(cat => byCategory[cat])
+      .map(cat => {
+        const data = byCategory[cat];
+        const sourceRows = Object.keys(data.sources).sort().map(src =>
+          `<div class="flex-between" style="padding-left:14px; margin-top:3px; font-size:11.5px; color:var(--muted);">
+            <span>↳ ${src}</span><span>${data.sources[src].toLocaleString('de-DE')}</span>
+          </div>`
+        ).join('');
+        return `<div class="flex-between" style="margin-top:6px;">
+          <span style="font-weight:600; color:var(--navy);">${cat}</span>
+          <span style="font-weight:700;">${data.total.toLocaleString('de-DE')} Meilen</span>
+        </div>${sourceRows}`;
+      }).join('');
+  }
+
+  // --- Filter-Dropdowns befüllen (Auswahl dabei erhalten) ---
+  const catSelect = document.getElementById('mi-filter-category');
+  const prevCat = catSelect.value;
+  const usedCategories = MILES_CATEGORIES.filter(cat => milesLog.some(mv => mv.category === cat));
+  catSelect.innerHTML = '<option value="">Alle</option>' + usedCategories.map(c => `<option value="${c}">${c}</option>`).join('');
+  if (usedCategories.includes(prevCat)) catSelect.value = prevCat;
+
+  const yearSelect = document.getElementById('mi-filter-year');
+  const prevYear = yearSelect.value;
+  const usedYears = [...new Set(milesLog.map(mv => (mv.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
+  yearSelect.innerHTML = '<option value="">Alle</option>' + usedYears.map(y => `<option value="${y}">${y}</option>`).join('');
+  if (usedYears.includes(prevYear)) yearSelect.value = prevYear;
+
+  // --- Chronologische, gefilterte Liste ---
+  const filterCat = catSelect.value;
+  const filterYear = yearSelect.value;
+  const filtered = milesLog
+    .map((mv, idx) => ({ ...mv, idx }))
+    .filter(mv => !filterCat || mv.category === filterCat)
+    .filter(mv => !filterYear || (mv.date || '').startsWith(filterYear));
+
+  const listEl = document.getElementById('miles-list');
+  if (milesLog.length === 0) {
+    listEl.innerHTML = '<div class="empty">Noch keine Meilen-Bewegungen erfasst.</div>';
+    return;
+  }
+  if (filtered.length === 0) {
+    listEl.innerHTML = '<div class="empty">Noch keine Bewegungen für diesen Filter.</div>';
+    return;
+  }
+  const sorted = [...filtered].sort((a, b) => new Date(b.date) - new Date(a.date));
+  listEl.innerHTML = sorted.map(mv => `<div class="trip">
+    <div class="top">
+      <div>
+        <div class="route">${mv.category}${mv.source ? ' · ' + mv.source : ''}</div>
+        <div class="meta">${mv.date}</div>
+        ${mv.note ? `<div class="meta">📝 ${mv.note}</div>` : ''}
+      </div>
+      <div class="pts"><div class="p" style="color:${mv.amount >= 0 ? 'var(--green)' : 'var(--red)'};">${mv.amount >= 0 ? '+' : ''}${mv.amount.toLocaleString('de-DE')}</div></div>
+    </div>
+    <button class="del" onclick="deleteMilesMovement(${mv.idx})">entfernen</button>
+  </div>`).join('');
+}
+
 // ---------- persistence ----------
 
 async function saveBaseline() { await DB.set(KEY_BASE, baseline); }
@@ -686,6 +768,7 @@ async function saveValueLog() { await DB.set(KEY_VALUECALC, valueLog); }
 async function saveUpgrades() { await DB.set(KEY_UPGRADES, upgrades); }
 async function saveMarketplace() { await DB.set(KEY_MARKETPLACE, marketplace); }
 async function saveSenatorGround() { await DB.set(KEY_SENATOR_GROUND, senatorGround); }
+async function saveMilesLog() { await DB.set(KEY_MILES_LOG, milesLog); }
 
 async function loadAll() {
   baseline = await DB.get(KEY_BASE, baseline);
@@ -698,6 +781,7 @@ async function loadAll() {
   upgrades = await DB.get(KEY_UPGRADES, []);
   marketplace = await DB.get(KEY_MARKETPLACE, []);
   senatorGround = await DB.get(KEY_SENATOR_GROUND, senatorGround);
+  milesLog = await DB.get(KEY_MILES_LOG, []);
 
   let inventoryMigrated = false;
   inventory.forEach(i => { if (!i.id) { i.id = genId(); inventoryMigrated = true; } });
@@ -726,6 +810,7 @@ window.deleteCalc = async function(idx) { valueLog.splice(idx, 1); await saveVal
 window.deleteUpgrade = async function(idx) { upgrades.splice(idx, 1); await saveUpgrades(); render(); };
 window.deleteMarketplace = async function(idx) { marketplace.splice(idx, 1); await saveMarketplace(); render(); };
 window.deleteUptrip = async function(idx) { uptripItems.splice(idx, 1); await saveUptrip(); render(); };
+window.deleteMilesMovement = async function(idx) { milesLog.splice(idx, 1); await saveMilesLog(); render(); };
 
 window.assignSelectedCards = async function(idx) {
   const select = document.getElementById(`assign-select-${idx}`);
@@ -1055,8 +1140,39 @@ document.getElementById('mp-form').addEventListener('submit', async (e) => {
   render();
 });
 
+document.getElementById('mi-category').addEventListener('change', () => {
+  const isExternal = document.getElementById('mi-category').value === 'Fremdprogramm-Umwandlung';
+  document.getElementById('mi-source-wrap').style.display = isExternal ? 'block' : 'none';
+  document.getElementById('mi-source').required = isExternal;
+});
+
+document.getElementById('mi-filter-category').addEventListener('change', renderMiles);
+document.getElementById('mi-filter-year').addEventListener('change', renderMiles);
+
+document.getElementById('miles-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const category = document.getElementById('mi-category').value;
+  const source = document.getElementById('mi-source').value.trim();
+  if (category === 'Fremdprogramm-Umwandlung' && !source) {
+    alert('Bitte bei "Fremdprogramm-Umwandlung" die Quelle angeben (z.B. "Payback").');
+    return;
+  }
+  milesLog.push({
+    date: document.getElementById('mi-date').value,
+    category,
+    source: category === 'Fremdprogramm-Umwandlung' ? source : '',
+    amount: parseInt(document.getElementById('mi-amount').value) || 0,
+    note: document.getElementById('mi-note').value
+  });
+  await saveMilesLog();
+  e.target.reset();
+  document.getElementById('mi-source-wrap').style.display = 'none';
+  document.getElementById('mi-source').required = false;
+  render();
+});
+
 document.getElementById('reset-btn').addEventListener('click', async () => {
-  if (!confirm('Wirklich alle Trips, Aktionen, Uptrip-Daten, Fristen, Marktplatz-Tausche und Berechnungen löschen? Basiswerte bleiben erhalten.')) return;
+  if (!confirm('Wirklich alle Trips, Aktionen, Uptrip-Daten, Fristen, Marktplatz-Tausche, Meilen-Bewegungen und Berechnungen löschen? Basiswerte bleiben erhalten.')) return;
   trips = [];
   promos = [];
   uptripItems = [];
@@ -1065,6 +1181,7 @@ document.getElementById('reset-btn').addEventListener('click', async () => {
   valueLog = [];
   upgrades = [];
   marketplace = [];
+  milesLog = [];
   await saveTrips();
   await savePromos();
   await saveUptrip();
@@ -1073,6 +1190,7 @@ document.getElementById('reset-btn').addEventListener('click', async () => {
   await saveValueLog();
   await saveUpgrades();
   await saveMarketplace();
+  await saveMilesLog();
   render();
 });
 

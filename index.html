@@ -497,6 +497,68 @@
 
   </section>
 
+  <!-- TAB: MEILEN -->
+  <section id="tab-meilen" class="section">
+
+    <div class="card">
+      <h2>💎 Meilen-Bewegung hinzufügen</h2>
+      <p class="hint" style="margin-top:0;">Betrag positiv = Zugang, negativ = Abgang/Einlösung. Der Meilen-Pool auf dem Dashboard ist immer Startwert + Summe aller Bewegungen.</p>
+      <form id="miles-form">
+        <div class="row2">
+          <div><label>Datum</label><input type="date" id="mi-date" required></div>
+          <div>
+            <label>Kategorie</label>
+            <select id="mi-category">
+              <option value="Flüge">Flüge</option>
+              <option value="Kreditkarte">Kreditkarte</option>
+              <option value="Hotel">Hotel</option>
+              <option value="Mietwagen">Mietwagen</option>
+              <option value="Fahrdienst">Fahrdienst</option>
+              <option value="Shopping">Shopping</option>
+              <option value="Parken">Parken</option>
+              <option value="Zeitschriften-Abo">Zeitschriften-Abo</option>
+              <option value="Reise-Buchungsportale">Reise-Buchungsportale</option>
+              <option value="Uptrip">Uptrip</option>
+              <option value="Fremdprogramm-Umwandlung">Fremdprogramm-Umwandlung</option>
+              <option value="Kulanz/Sonstiges">Kulanz/Sonstiges</option>
+            </select>
+          </div>
+        </div>
+        <div id="mi-source-wrap" style="display:none;">
+          <label>Quelle (z.B. "Shell ClubSmart", "Payback", "Amex Membership Rewards")</label>
+          <input type="text" id="mi-source" placeholder="Externes Programm">
+        </div>
+        <label>Betrag (Meilen, negativ für Abgang/Einlösung)</label>
+        <input type="number" id="mi-amount" required>
+        <label>Notiz</label>
+        <input type="text" id="mi-note" placeholder="optional">
+        <button type="submit" class="btn secondary">Bewegung speichern</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>📊 Meilen-Fortschritt <span class="badge" id="miles-count">0</span></h2>
+      <div id="miles-breakdown"><div class="empty">Noch keine Meilen-Bewegungen erfasst.</div></div>
+
+      <div class="row2" style="margin-top:14px;">
+        <div>
+          <label style="margin-top:0;">Filter: Kategorie</label>
+          <select id="mi-filter-category">
+            <option value="">Alle</option>
+          </select>
+        </div>
+        <div>
+          <label style="margin-top:0;">Filter: Jahr</label>
+          <select id="mi-filter-year">
+            <option value="">Alle</option>
+          </select>
+        </div>
+      </div>
+      <div id="miles-list" style="margin-top:10px;"><div class="empty">Noch keine Bewegungen für diesen Filter.</div></div>
+    </div>
+
+  </section>
+
   <!-- TAB: MEHR -->
   <section id="tab-mehr" class="section">
 
@@ -528,6 +590,7 @@
   <button class="tab-btn" data-tab="tab-trips"><span class="ic">🧾</span>Trips</button>
   <button class="tab-btn" data-tab="tab-sammeln"><span class="ic">🎴</span>Sammeln</button>
   <button class="tab-btn" data-tab="tab-rechner"><span class="ic">💰</span>Rechner</button>
+  <button class="tab-btn" data-tab="tab-meilen"><span class="ic">💎</span>Meilen</button>
   <button class="tab-btn" data-tab="tab-mehr"><span class="ic">⋯</span>Mehr</button>
 </nav>
 
