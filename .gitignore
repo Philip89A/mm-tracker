@@ -3,3 +3,4 @@ miles-and-more-tracker_2.html
 backups/
 scripts/restore_backup.sql
 scripts/backfill_historic_trips.sql
+scripts/diagnose_2026_and_miles.sql
