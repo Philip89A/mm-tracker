@@ -48,7 +48,10 @@ function pointsForSegment(range, cls) {
     continental: { economy: 20, premium: 20, business: 40, first: 40 },
     intercontinental: { economy: 60, premium: 80, business: 200, first: 400 }
   };
-  return table[range][cls];
+  // Falls range/cls mal nicht zur Tabelle passen (z.B. Alt-/Fehldaten), lieber
+  // 0 zurückgeben als abstürzen — ein einzelner kaputter Trip darf nie die
+  // komplette Seite (inkl. aller Bereiche danach) lahmlegen.
+  return (table[range] && table[range][cls]) || 0;
 }
 
 function tripPoints(t) {
@@ -196,19 +199,27 @@ function render() {
   bar('gsen-bar-p', totals.p, 2000);
   bar('gsen-bar-q', totals.q, 1000);
 
-  renderEvoucherTracker();
-  renderSenatorTracker();
-  renderTrips();
-  renderYearChart();
-  renderPromos();
-  renderUptrip();
-  renderFristen();
-  renderInventory();
-  renderCalc();
-  renderUpgrades();
-  renderMarketplace();
-  renderMiles();
-  renderRedemptionIdeas();
+  // Jeder Bereich läuft isoliert: ein Fehler in einem Abschnitt (z.B. durch
+  // einen einzelnen fehlerhaften Datensatz) darf nie mehr verhindern, dass
+  // die übrigen Bereiche (u.a. Meilen, ganz am Ende) trotzdem aktualisiert
+  // werden.
+  [
+    renderEvoucherTracker,
+    renderSenatorTracker,
+    renderTrips,
+    renderYearChart,
+    renderPromos,
+    renderUptrip,
+    renderFristen,
+    renderInventory,
+    renderCalc,
+    renderUpgrades,
+    renderMarketplace,
+    renderMiles,
+    renderRedemptionIdeas
+  ].forEach(fn => {
+    try { fn(); } catch (e) { console.error('Render-Fehler in ' + fn.name + ':', e); }
+  });
 }
 
 function renderEvoucherTracker() {
