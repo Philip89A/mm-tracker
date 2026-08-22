@@ -25,7 +25,8 @@ let pendingReceivedCards = []; // staged "erhaltene Karte(n)" for the marketplac
 let milesLog = [];
 let redemptionIdeas = [];
 
-const MILES_CATEGORIES = ['Flüge', 'Executive Meilen', 'CO2-Kompensation', 'Kreditkarte', 'Hotel', 'Mietwagen', 'Fahrdienst', 'Shopping', 'Parken', 'Zeitschriften-Abo', 'Reise-Buchungsportale', 'Uptrip', 'Fremdprogramm-Umwandlung', 'Kulanz/Sonstiges'];
+const MILES_CATEGORIES = ['Flüge', 'Flughafen', 'Executive Meilen', 'CO2-Kompensation', 'Kreditkarte', 'Hotel', 'Mietwagen', 'Fahrdienst', 'Shopping', 'Parken', 'Zeitschriften-Abo', 'Reise-Buchungsportale', 'Uptrip', 'Fremdprogramm-Umwandlung', 'Kulanz/Sonstiges'];
+const AIRPORT_SUBTYPES = ['Aktionsmeilen', 'Shopping'];
 
 const SENATOR_YEAR = 2027;
 const SENATOR_QUARTERS = [
@@ -788,7 +789,10 @@ function renderMiles() {
       c.count += 1;
       if (mv.amount >= 0) { c.gained += mv.amount; totalGained += mv.amount; }
       else { c.redeemed += -mv.amount; totalRedeemed += -mv.amount; }
-      if (mv.category === 'Fremdprogramm-Umwandlung' && mv.source) {
+      // Jede Kategorie mit gesetztem "source"/"Art"-Feld bekommt eine
+      // Unterkategorie-Aufschlüsselung — nicht mehr nur Fremdprogramm-
+      // Umwandlung, sondern z.B. auch Flughafen (Aktionsmeilen/Shopping).
+      if (mv.source) {
         c.sources[mv.source] = (c.sources[mv.source] || 0) + mv.amount;
       }
     });
@@ -1287,9 +1291,12 @@ document.getElementById('mp-form').addEventListener('submit', async (e) => {
 });
 
 document.getElementById('mi-category').addEventListener('change', () => {
-  const isExternal = document.getElementById('mi-category').value === 'Fremdprogramm-Umwandlung';
+  const cat = document.getElementById('mi-category').value;
+  const isExternal = cat === 'Fremdprogramm-Umwandlung';
+  const isAirport = cat === 'Flughafen';
   document.getElementById('mi-source-wrap').style.display = isExternal ? 'block' : 'none';
   document.getElementById('mi-source').required = isExternal;
+  document.getElementById('mi-airport-subtype-wrap').style.display = isAirport ? 'block' : 'none';
 });
 
 document.getElementById('mi-filter-category').addEventListener('change', renderMiles);
@@ -1303,10 +1310,14 @@ document.getElementById('miles-form').addEventListener('submit', async (e) => {
     alert('Bitte bei "Fremdprogramm-Umwandlung" die Quelle angeben (z.B. "Payback").');
     return;
   }
+  let entrySource = '';
+  if (category === 'Fremdprogramm-Umwandlung') entrySource = source;
+  else if (category === 'Flughafen') entrySource = document.getElementById('mi-airport-subtype').value;
+
   milesLog.push({
     date: document.getElementById('mi-date').value,
     category,
-    source: category === 'Fremdprogramm-Umwandlung' ? source : '',
+    source: entrySource,
     amount: parseInt(document.getElementById('mi-amount').value) || 0,
     note: document.getElementById('mi-note').value
   });
@@ -1314,6 +1325,7 @@ document.getElementById('miles-form').addEventListener('submit', async (e) => {
   e.target.reset();
   document.getElementById('mi-source-wrap').style.display = 'none';
   document.getElementById('mi-source').required = false;
+  document.getElementById('mi-airport-subtype-wrap').style.display = 'none';
   render();
 });
 

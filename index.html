@@ -520,6 +520,7 @@
             <label>Kategorie</label>
             <select id="mi-category">
               <option value="Flüge">Flüge</option>
+              <option value="Flughafen">Flughafen</option>
               <option value="Executive Meilen">Executive Meilen</option>
               <option value="CO2-Kompensation">CO2-Kompensation (Klimabeitrag)</option>
               <option value="Kreditkarte">Kreditkarte</option>
@@ -539,6 +540,14 @@
         <div id="mi-source-wrap" style="display:none;">
           <label>Quelle (z.B. "Shell ClubSmart", "Payback", "Amex Membership Rewards")</label>
           <input type="text" id="mi-source" placeholder="Externes Programm">
+        </div>
+        <div id="mi-airport-subtype-wrap" style="display:none;">
+          <label>Art (optional)</label>
+          <select id="mi-airport-subtype">
+            <option value="">Allgemein</option>
+            <option value="Aktionsmeilen">Aktionsmeilen</option>
+            <option value="Shopping">Shopping</option>
+          </select>
         </div>
         <label>Betrag (Meilen, negativ für Abgang/Einlösung)</label>
         <input type="number" id="mi-amount" required>
