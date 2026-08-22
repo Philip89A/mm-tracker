@@ -741,6 +741,37 @@ function formatCardList(arr) {
   return arr.map(c => c.name + (c.count > 1 ? ' ×' + c.count : '')).join(', ');
 }
 
+function renderMilesTrend() {
+  const el = document.getElementById('miles-trend-chart');
+  const titleEl = document.getElementById('miles-trend-title');
+  const byMonth = {};
+  milesLog.forEach(mv => {
+    if (!mv.date) return;
+    const key = mv.date.slice(0, 7); // "YYYY-MM"
+    byMonth[key] = (byMonth[key] || 0) + mv.amount;
+  });
+  const months = Object.keys(byMonth).sort();
+  if (months.length === 0) {
+    el.innerHTML = '';
+    titleEl.style.display = 'none';
+    return;
+  }
+  titleEl.style.display = 'block';
+  const maxAbs = Math.max(1, ...months.map(m => Math.abs(byMonth[m])));
+
+  el.innerHTML = `<div class="trend-chart">${months.map(m => {
+    const val = byMonth[m];
+    const h = Math.max(2, Math.round((Math.abs(val) / maxAbs) * 100));
+    const label = m.slice(2).replace('-', '/'); // "26/08"
+    return `<div class="trend-col">
+      <div class="trend-bar-wrap">
+        <div class="trend-bar ${val >= 0 ? 'pos' : 'neg'}" style="height:${h}px;"><span class="trend-bar-val">${val >= 0 ? '+' : ''}${val.toLocaleString('de-DE')}</span></div>
+      </div>
+      <div class="trend-label">${label}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
 function renderMiles() {
   document.getElementById('miles-count').textContent = milesLog.length;
 
@@ -749,14 +780,19 @@ function renderMiles() {
   if (milesLog.length === 0) {
     breakdownEl.innerHTML = '<div class="empty">Noch keine Meilen-Bewegungen erfasst.</div>';
   } else {
+    let totalGained = 0, totalRedeemed = 0;
     const byCategory = {};
     milesLog.forEach(mv => {
-      byCategory[mv.category] = byCategory[mv.category] || { total: 0, sources: {} };
-      byCategory[mv.category].total += mv.amount;
+      const c = (byCategory[mv.category] = byCategory[mv.category] || { total: 0, gained: 0, redeemed: 0, count: 0, sources: {} });
+      c.total += mv.amount;
+      c.count += 1;
+      if (mv.amount >= 0) { c.gained += mv.amount; totalGained += mv.amount; }
+      else { c.redeemed += -mv.amount; totalRedeemed += -mv.amount; }
       if (mv.category === 'Fremdprogramm-Umwandlung' && mv.source) {
-        byCategory[mv.category].sources[mv.source] = (byCategory[mv.category].sources[mv.source] || 0) + mv.amount;
+        c.sources[mv.source] = (c.sources[mv.source] || 0) + mv.amount;
       }
     });
+
     // Nach Höhe sortiert (absteigend), damit auf einen Blick sichtbar ist,
     // was am meisten Meilen gebracht hat.
     const sortedCats = MILES_CATEGORIES
@@ -764,21 +800,38 @@ function renderMiles() {
       .sort((a, b) => byCategory[b].total - byCategory[a].total);
     const topCat = sortedCats.length && byCategory[sortedCats[0]].total > 0 ? sortedCats[0] : null;
 
-    breakdownEl.innerHTML = sortedCats
-      .map(cat => {
-        const data = byCategory[cat];
-        const sortedSources = Object.keys(data.sources).sort((a, b) => data.sources[b] - data.sources[a]);
-        const sourceRows = sortedSources.map(src =>
-          `<div class="flex-between" style="padding-left:14px; margin-top:3px; font-size:11.5px; color:var(--muted);">
-            <span>↳ ${src}</span><span>${data.sources[src].toLocaleString('de-DE')}</span>
-          </div>`
-        ).join('');
-        return `<div class="flex-between" style="margin-top:6px;">
+    const totalsHtml = `<div class="miles-totals-box">
+      <div class="flex-between"><span>Gesamt Zugang</span><span style="color:var(--green); font-weight:700;">+${totalGained.toLocaleString('de-DE')}</span></div>
+      <div class="flex-between" style="margin-top:4px;"><span>Gesamt Abgang/Einlösung</span><span style="color:var(--red); font-weight:700;">−${totalRedeemed.toLocaleString('de-DE')}</span></div>
+      <div class="flex-between" style="margin-top:4px; padding-top:6px; border-top:1px solid var(--gray-border);"><span style="font-weight:700;">Netto</span><span style="font-weight:700;">${(totalGained - totalRedeemed).toLocaleString('de-DE')}</span></div>
+    </div>`;
+
+    const catRows = sortedCats.map(cat => {
+      const data = byCategory[cat];
+      const pct = totalGained > 0 ? Math.round((data.gained / totalGained) * 100) : 0;
+      const sortedSources = Object.keys(data.sources).sort((a, b) => data.sources[b] - data.sources[a]);
+      const sourceRows = sortedSources.map(src =>
+        `<div class="flex-between" style="padding-left:14px; margin-top:3px; font-size:11.5px; color:var(--muted);">
+          <span>↳ ${src}</span><span>${data.sources[src].toLocaleString('de-DE')}</span>
+        </div>`
+      ).join('');
+      const metaParts = [`${data.count} ${data.count === 1 ? 'Eintrag' : 'Einträge'}`];
+      if (data.gained > 0) metaParts.push(`${pct}% der gesammelten Meilen`);
+      if (data.redeemed > 0) metaParts.push(`davon ${data.redeemed.toLocaleString('de-DE')} eingelöst`);
+      return `<div class="miles-cat-row">
+        <div class="flex-between">
           <span style="font-weight:600; color:var(--navy);">${cat}${cat === topCat ? ' 🏆' : ''}</span>
           <span style="font-weight:700;">${data.total.toLocaleString('de-DE')} Meilen</span>
-        </div>${sourceRows}`;
-      }).join('');
+        </div>
+        <div class="miles-cat-meta">${metaParts.join(' · ')}</div>
+        ${sourceRows}
+      </div>`;
+    }).join('');
+
+    breakdownEl.innerHTML = totalsHtml + catRows;
   }
+
+  renderMilesTrend();
 
   // --- Filter-Dropdowns befüllen (Auswahl dabei erhalten) ---
   const catSelect = document.getElementById('mi-filter-category');

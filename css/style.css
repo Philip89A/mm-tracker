@@ -183,6 +183,19 @@ th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: upp
 .year-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .year-legend .dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
 
+.miles-totals-box { background: var(--gray-bg); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; }
+.miles-cat-row { margin-top: 10px; }
+.miles-cat-meta { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+.trend-chart { display: flex; align-items: flex-end; gap: 10px; overflow-x: auto; padding: 20px 4px 0; min-height: 130px; }
+.trend-col { display: flex; flex-direction: column; align-items: center; flex: 0 0 auto; }
+.trend-bar-wrap { display: flex; align-items: flex-end; height: 100px; }
+.trend-bar { width: 22px; border-radius: 4px 4px 0 0; position: relative; min-height: 2px; }
+.trend-bar.pos { background: linear-gradient(180deg, #6fd6a8, var(--green)); }
+.trend-bar.neg { background: linear-gradient(180deg, #f3a89c, var(--red)); }
+.trend-bar-val { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); font-size: 9.5px; font-weight: 700; color: var(--navy); white-space: nowrap; }
+.trend-label { margin-top: 6px; font-size: 10.5px; font-weight: 600; color: var(--muted); }
+
 .uptrip-card {
   background: linear-gradient(160deg, var(--navy), var(--navy2));
   border-radius: 14px;
