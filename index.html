@@ -205,6 +205,13 @@
         </div>
         <label>Notiz (optional)</label>
         <input type="text" id="t-note" placeholder="z.B. über MUC geroutet, Upgrade 140€">
+        <p class="hint" style="margin:12px 0 0;">Optional: Meilen für diesen Flug — werden automatisch als Meilen-Bewegungen angelegt (kein doppeltes Eintragen im Meilen-Tab nötig).</p>
+        <div class="row2">
+          <div><label>Erhaltene Meilen</label><input type="number" id="t-miles" min="0" placeholder="0"></div>
+          <div><label>Executive Meilen</label><input type="number" id="t-exec-miles" min="0" placeholder="0"></div>
+        </div>
+        <label>CO2-Kompensationsmeilen</label>
+        <input type="number" id="t-co2-miles" min="0" placeholder="0">
         <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:600; color:var(--text);">
           <input type="checkbox" id="t-historical" style="width:auto;">
           Historisch (zählt nicht in die aktuelle Gesamtsumme/Dashboard, nur im Jahresvergleich sichtbar)

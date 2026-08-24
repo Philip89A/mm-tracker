@@ -935,6 +935,10 @@ async function loadAll() {
   inventory.forEach(i => { if (!i.id) { i.id = genId(); inventoryMigrated = true; } });
   if (inventoryMigrated) await saveInventory();
 
+  let tripsMigrated = false;
+  trips.forEach(t => { if (!t.id) { t.id = genId(); tripsMigrated = true; } });
+  if (tripsMigrated) await saveTrips();
+
   if (migrateLegacyUptripCardNames()) await saveUptrip();
 
   document.getElementById('base-p').value = baseline.p;
@@ -950,7 +954,17 @@ async function loadAll() {
 
 // ---------- delete / action handlers ----------
 
-window.deleteTrip = async function(idx) { trips.splice(idx, 1); await saveTrips(); render(); };
+window.deleteTrip = async function(idx) {
+  const trip = trips[idx];
+  trips.splice(idx, 1);
+  await saveTrips();
+  if (trip && trip.id) {
+    const before = milesLog.length;
+    milesLog = milesLog.filter(mv => mv.sourceTripId !== trip.id);
+    if (milesLog.length !== before) await saveMilesLog();
+  }
+  render();
+};
 window.deletePromo = async function(idx) { promos.splice(idx, 1); await savePromos(); render(); };
 window.deleteFristen = async function(idx) { fristen.splice(idx, 1); await saveFristen(); render(); };
 window.deleteInventory = async function(idx) { inventory.splice(idx, 1); await saveInventory(); render(); };
@@ -1064,7 +1078,9 @@ document.getElementById('senator-ground-form').addEventListener('submit', async 
 
 document.getElementById('trip-form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  const tripId = genId();
   const trip = {
+    id: tripId,
     date: document.getElementById('t-date').value,
     route: document.getElementById('t-route').value,
     range: document.getElementById('t-range').value,
@@ -1076,6 +1092,32 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
   };
   trips.push(trip);
   await saveTrips();
+
+  // Meilen für diesen Flug direkt mit anlegen, statt sie separat im
+  // Meilen-Tab nachzutragen — mit sourceTripId markiert, damit sie beim
+  // Löschen des Trips automatisch mit entfernt werden.
+  const milesFields = [
+    { id: 't-miles', category: 'Flüge' },
+    { id: 't-exec-miles', category: 'Executive Meilen' },
+    { id: 't-co2-miles', category: 'CO2-Kompensation' }
+  ];
+  let milesAdded = false;
+  milesFields.forEach(f => {
+    const amount = parseInt(document.getElementById(f.id).value) || 0;
+    if (amount > 0) {
+      milesLog.push({
+        date: trip.date,
+        category: f.category,
+        source: '',
+        amount,
+        note: `Automatisch aus Trip ${trip.route}`,
+        sourceTripId: tripId
+      });
+      milesAdded = true;
+    }
+  });
+  if (milesAdded) await saveMilesLog();
+
   e.target.reset();
   document.getElementById('t-segments').value = 2;
   render();
