@@ -120,6 +120,42 @@ function computeTotals() {
   return { p, q, m };
 }
 
+// Wie computeTotals(), aber "Geplant"-Trips zählen hier noch NICHT als
+// erzielt — nur für die Haupt-Dashboard-Anzeige (Statuszahlen + Zielfokus).
+// Die Quartals-Tracker (eVoucher 2026 / Senator 2027) rechnen bewusst
+// weiter mit computeTotals() inkl. geplanter Flüge, da sie explizit als
+// Prognose "inkl. bereits gebuchter Flüge" gedacht sind.
+function computeAchievedTotals() {
+  let p = baseline.p, q = baseline.q, m = baseline.m;
+  trips.forEach(t => {
+    if (t.historical || t.planned) return;
+    const total = tripPoints(t);
+    p += total;
+    q += total;
+  });
+  uptripItems.forEach(u => {
+    const times = u.redemptionCount || 0;
+    p += (u.rewardPoints || 0) * times;
+    q += (u.rewardQP || 0) * times;
+    m += (u.rewardMeilen || 0) * times;
+  });
+  milesLog.forEach(mv => { m += mv.amount || 0; });
+  return { p, q, m };
+}
+
+function computePlannedDelta() {
+  let p = 0, q = 0, count = 0;
+  trips.forEach(t => {
+    if (t.planned && !t.historical) {
+      const total = tripPoints(t);
+      p += total;
+      q += total;
+      count += 1;
+    }
+  });
+  return { p, q, count };
+}
+
 function senatorYearTotals() {
   const tripSum = trips
     .filter(t => t.date && t.date.startsWith(String(SENATOR_YEAR)))
@@ -245,10 +281,19 @@ function migrateLegacyUptripCardNames() {
 // ---------- render ----------
 
 function render() {
-  const totals = computeTotals();
+  const totals = computeAchievedTotals();
   document.getElementById('stat-p').textContent = totals.p.toLocaleString('de-DE');
   document.getElementById('stat-q').textContent = totals.q.toLocaleString('de-DE');
   document.getElementById('stat-m').textContent = totals.m.toLocaleString('de-DE');
+
+  const plannedEl = document.getElementById('planned-delta-display');
+  const planned = computePlannedDelta();
+  if (planned.count > 0) {
+    plannedEl.textContent = `📅 zzgl. +${planned.p.toLocaleString('de-DE')} P / +${planned.q.toLocaleString('de-DE')} QP geplantes Budget aus ${planned.count} geplanten Flug${planned.count === 1 ? '' : 'en'} (noch nicht erzielt)`;
+    plannedEl.style.display = 'block';
+  } else {
+    plannedEl.style.display = 'none';
+  }
 
   const baseNoteEl = document.getElementById('base-note-display');
   if (baseline.note) {
@@ -372,11 +417,24 @@ function renderSenatorTracker() {
 function renderTrips() {
   const list = document.getElementById('trip-list');
   document.getElementById('trip-count').textContent = trips.length;
+
+  const yearSelect = document.getElementById('trip-filter-year');
+  const prevYear = yearSelect.value;
+  const usedYears = [...new Set(trips.map(t => (t.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
+  yearSelect.innerHTML = '<option value="">Alle</option>' + usedYears.map(y => `<option value="${y}">${y}</option>`).join('');
+  if (usedYears.includes(prevYear)) yearSelect.value = prevYear;
+  const filterYear = yearSelect.value;
+
   if (trips.length === 0) {
     list.innerHTML = '<div class="empty">Noch keine Trips erfasst.</div>';
     return;
   }
-  const sorted = [...trips].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const filtered = filterYear ? trips.filter(t => (t.date || '').startsWith(filterYear)) : trips;
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="empty">Keine Trips für dieses Jahr.</div>';
+    return;
+  }
+  const sorted = [...filtered].sort((a, b) => new Date(b.date) - new Date(a.date));
   list.innerHTML = sorted.map(t => {
     const total = tripPoints(t);
     const idx = trips.indexOf(t);
@@ -390,10 +448,13 @@ function renderTrips() {
           ${t.note ? `<div class="meta">📝 ${t.note}</div>` : ''}
         </div>
         <div class="pts">
-          <div class="p" style="${t.historical ? 'opacity:0.5; text-decoration:line-through;' : ''}">+${total} P/QP</div>
+          <div class="p" style="${t.historical ? 'opacity:0.5; text-decoration:line-through;' : (t.planned ? 'opacity:0.6;' : '')}">+${total} P/QP</div>
         </div>
       </div>
-      <button class="del" onclick="deleteTrip(${idx})">entfernen</button>
+      <div class="flex-between" style="margin-top:6px;">
+        <button class="del" onclick="deleteTrip(${idx})">entfernen</button>
+        <button type="button" class="btn small secondary" onclick="startEditTrip(${idx})">✏️ Bearbeiten</button>
+      </div>
     </div>`;
   }).join('');
 }
@@ -442,22 +503,47 @@ function renderYearChart() {
     </div>`;
 }
 
+let showPastPromos = false;
+
 function renderPromos() {
   const list = document.getElementById('promo-list');
   if (promos.length === 0) {
     list.innerHTML = '<div class="empty">Noch keine Aktionen eingetragen.</div>';
     return;
   }
-  const sorted = [...promos].sort((a, b) => new Date(b.until || 0) - new Date(a.until || 0));
-  list.innerHTML = sorted.map(p => {
-    const idx = promos.indexOf(p);
-    return `<div class="promo">
-      <div class="flex-between"><b>${p.title}</b><button class="del" onclick="deletePromo(${idx})">✕</button></div>
+  const today = new Date().toISOString().slice(0, 10);
+  const withIdx = promos.map((p, idx) => ({ ...p, idx }));
+  const current = withIdx.filter(p => !p.until || p.until >= today);
+  const past = withIdx.filter(p => p.until && p.until < today);
+
+  const renderCard = (p) => `<div class="promo">
+      <div class="flex-between"><b>${p.title}</b><button class="del" onclick="deletePromo(${p.idx})">✕</button></div>
       ${p.until ? `<div class="d">gültig bis ${p.until}</div>` : ''}
       <div>${p.note}</div>
     </div>`;
-  }).join('');
+
+  const currentSorted = [...current].sort((a, b) => new Date(a.until || '9999-12-31') - new Date(b.until || '9999-12-31'));
+  let html = currentSorted.length
+    ? currentSorted.map(renderCard).join('')
+    : '<div class="empty">Keine aktuellen Aktionen — vergangene siehe unten.</div>';
+
+  if (past.length > 0) {
+    html += `<button type="button" class="btn small secondary" style="width:100%; margin-top:10px;" onclick="togglePastPromos()">
+      ${showPastPromos ? '▴ Vergangene Aktionen ausblenden' : `▾ Vergangene Aktionen anzeigen (${past.length})`}
+    </button>`;
+    if (showPastPromos) {
+      const pastSorted = [...past].sort((a, b) => new Date(b.until) - new Date(a.until));
+      html += `<div style="margin-top:6px;">${pastSorted.map(renderCard).join('')}</div>`;
+    }
+  }
+
+  list.innerHTML = html;
 }
+
+window.togglePastPromos = function() {
+  showPastPromos = !showPastPromos;
+  renderPromos();
+};
 
 function renderFristen() {
   const list = document.getElementById('fristen-list');
@@ -483,10 +569,41 @@ function renderFristen() {
         </div>
         <div class="pts"><span class="tag ${tagClass}">${tagText}</span></div>
       </div>
-      <button class="del" onclick="deleteFristen(${idx})">entfernen</button>
+      <div class="flex-between" style="margin-top:6px;">
+        <button class="del" onclick="deleteFristen(${idx})">entfernen</button>
+        <button type="button" class="btn small secondary" onclick="downloadFristIcs(${idx})">📅 Zu Kalender hinzufügen</button>
+      </div>
     </div>`;
   }).join('');
 }
+
+function icsEscape(s) {
+  return String(s || '').replace(/([,;])/g, '\\$1').replace(/\n/g, '\\n');
+}
+
+window.downloadFristIcs = function(idx) {
+  const f = fristen[idx];
+  if (!f || !f.date) return;
+  const dt = f.date.replace(/-/g, '');
+  const uid = 'mm-frist-' + dt + '-' + Math.random().toString(36).slice(2, 10) + '@mm-tracker';
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Miles & More Tracker//DE',
+    'CALSCALE:GREGORIAN',
+    'BEGIN:VEVENT',
+    'UID:' + uid,
+    'DTSTAMP:' + stamp,
+    'DTSTART;VALUE=DATE:' + dt,
+    'DTEND;VALUE=DATE:' + dt,
+    'SUMMARY:' + icsEscape(f.title),
+    f.note ? 'DESCRIPTION:' + icsEscape(f.note) : null,
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].filter(Boolean);
+  downloadBlob(lines.join('\r\n'), 'text/calendar;charset=utf-8;', (f.title || 'Frist').replace(/[^a-z0-9]+/gi, '_') + '.ics');
+};
 
 const cardTypeLabel = { airline: 'Airline', city: 'City', aircraft: 'Flugzeugtyp' };
 
@@ -804,6 +921,45 @@ function formatCardList(arr) {
   return arr.map(c => c.name + (c.count > 1 ? ' ×' + c.count : '')).join(', ');
 }
 
+function downloadBlob(content, mimeType, filename) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function csvEscape(v) {
+  return `"${String(v ?? '').replace(/"/g, '""')}"`;
+}
+
+window.exportTripsCsv = function() {
+  const header = ['Datum', 'Strecke', 'Reichweite', 'Klasse', 'Segmente', 'CO2-Bonus %', 'Points/QP', 'Historisch', 'Geplant', 'Notiz'];
+  const sorted = [...trips].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const rows = sorted.map(t => [
+    t.date,
+    t.route,
+    t.range === 'continental' ? 'Kontinental' : 'Interkontinental',
+    labelClass(t.cls),
+    t.segments,
+    t.co2,
+    tripPoints(t),
+    t.historical ? 'Ja' : 'Nein',
+    t.planned ? 'Ja' : 'Nein',
+    t.note || ''
+  ]);
+  // Semikolon als Trenner + UTF-8-BOM, damit Excel (deutsche Ländereinstellung)
+  // die Datei direkt richtig spaltenweise und mit Umlauten öffnet.
+  const lines = [header, ...rows].map(r => r.map(csvEscape).join(';'));
+  const BOM = String.fromCharCode(0xFEFF);
+  const csv = BOM + lines.join('\r\n');
+  downloadBlob(csv, 'text/csv;charset=utf-8;', `trip-log-${new Date().toISOString().slice(0, 10)}.csv`);
+};
+
 function renderMilesTrend() {
   const el = document.getElementById('miles-trend-chart');
   const titleEl = document.getElementById('miles-trend-title');
@@ -939,7 +1095,10 @@ function renderMiles() {
       </div>
       <div class="pts"><div class="p" style="color:${mv.amount >= 0 ? 'var(--green)' : 'var(--red)'};">${mv.amount >= 0 ? '+' : ''}${mv.amount.toLocaleString('de-DE')}</div></div>
     </div>
-    <button class="del" onclick="deleteMilesMovement(${mv.idx})">entfernen</button>
+    <div class="flex-between" style="margin-top:6px;">
+      <button class="del" onclick="deleteMilesMovement(${mv.idx})">entfernen</button>
+      <button type="button" class="btn small secondary" onclick="startEditMiles(${mv.idx})">✏️ Bearbeiten</button>
+    </div>
   </div>`).join('');
 }
 
@@ -1022,6 +1181,10 @@ async function loadAll() {
   let tripsMigrated = false;
   trips.forEach(t => { if (!t.id) { t.id = genId(); tripsMigrated = true; } });
   if (tripsMigrated) await saveTrips();
+
+  let milesMigrated = false;
+  milesLog.forEach(mv => { if (!mv.id) { mv.id = genId(); milesMigrated = true; } });
+  if (milesMigrated) await saveMilesLog();
 
   if (migrateLegacyUptripCardNames()) await saveUptrip();
 
@@ -1161,9 +1324,43 @@ document.getElementById('senator-ground-form').addEventListener('submit', async 
   render();
 });
 
+let editingTripId = null;
+
+window.startEditTrip = function(idx) {
+  const t = trips[idx];
+  if (!t) return;
+  editingTripId = t.id;
+  document.getElementById('t-date').value = t.date || '';
+  document.getElementById('t-route').value = t.route || '';
+  document.getElementById('t-range').value = t.range || 'continental';
+  document.getElementById('t-class').value = t.cls || 'economy';
+  document.getElementById('t-segments').value = t.segments || 1;
+  document.getElementById('t-co2').value = String(t.co2 || 0);
+  document.getElementById('t-note').value = t.note || '';
+  document.getElementById('t-historical').checked = !!t.historical;
+  document.getElementById('t-planned').checked = !!t.planned;
+  const linkedMiles = milesLog.filter(mv => mv.sourceTripId === t.id);
+  document.getElementById('t-miles').value = (linkedMiles.find(mv => mv.category === 'Flüge') || {}).amount || '';
+  document.getElementById('t-exec-miles').value = (linkedMiles.find(mv => mv.category === 'Executive Meilen') || {}).amount || '';
+  document.getElementById('t-co2-miles').value = (linkedMiles.find(mv => mv.category === 'CO2-Kompensation') || {}).amount || '';
+  document.getElementById('trip-submit-btn').textContent = 'Änderungen speichern';
+  document.getElementById('trip-cancel-btn').style.display = 'block';
+  document.querySelector('[data-tab="tab-trips"]').click();
+  document.getElementById('t-date').scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
+
+window.cancelEditTrip = function() {
+  editingTripId = null;
+  document.getElementById('trip-form').reset();
+  document.getElementById('t-segments').value = 2;
+  document.getElementById('trip-submit-btn').textContent = 'Trip speichern';
+  document.getElementById('trip-cancel-btn').style.display = 'none';
+};
+
 document.getElementById('trip-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const tripId = genId();
+  const isEdit = !!editingTripId;
+  const tripId = isEdit ? editingTripId : genId();
   const trip = {
     id: tripId,
     date: document.getElementById('t-date').value,
@@ -1176,22 +1373,29 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     historical: document.getElementById('t-historical').checked,
     planned: document.getElementById('t-planned').checked
   };
-  trips.push(trip);
+  if (isEdit) {
+    const idx = trips.findIndex(t => t.id === tripId);
+    if (idx >= 0) trips[idx] = trip; else trips.push(trip);
+  } else {
+    trips.push(trip);
+  }
   await saveTrips();
 
   // Meilen für diesen Flug direkt mit anlegen, statt sie separat im
   // Meilen-Tab nachzutragen — mit sourceTripId markiert, damit sie beim
-  // Löschen des Trips automatisch mit entfernt werden.
+  // Löschen/Bearbeiten des Trips automatisch mit entfernt/neu angelegt werden.
+  if (isEdit) milesLog = milesLog.filter(mv => mv.sourceTripId !== tripId);
   const milesFields = [
     { id: 't-miles', category: 'Flüge' },
     { id: 't-exec-miles', category: 'Executive Meilen' },
     { id: 't-co2-miles', category: 'CO2-Kompensation' }
   ];
-  let milesAdded = false;
+  let milesChanged = isEdit;
   milesFields.forEach(f => {
     const amount = parseInt(document.getElementById(f.id).value) || 0;
     if (amount > 0) {
       milesLog.push({
+        id: genId(),
         date: trip.date,
         category: f.category,
         source: '',
@@ -1199,13 +1403,12 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
         note: `Automatisch aus Trip ${trip.route}`,
         sourceTripId: tripId
       });
-      milesAdded = true;
+      milesChanged = true;
     }
   });
-  if (milesAdded) await saveMilesLog();
+  if (milesChanged) await saveMilesLog();
 
-  e.target.reset();
-  document.getElementById('t-segments').value = 2;
+  cancelEditTrip();
   render();
 });
 
@@ -1429,6 +1632,36 @@ document.getElementById('mi-category').addEventListener('change', () => {
 
 document.getElementById('mi-filter-category').addEventListener('change', renderMiles);
 document.getElementById('mi-filter-year').addEventListener('change', renderMiles);
+document.getElementById('trip-filter-year').addEventListener('change', renderTrips);
+
+let editingMilesId = null;
+
+window.startEditMiles = function(idx) {
+  const mv = milesLog[idx];
+  if (!mv) return;
+  editingMilesId = mv.id;
+  document.getElementById('mi-date').value = mv.date || '';
+  const catSelect = document.getElementById('mi-category');
+  catSelect.value = mv.category;
+  catSelect.dispatchEvent(new Event('change'));
+  if (mv.category === 'Fremdprogramm-Umwandlung') document.getElementById('mi-source').value = mv.source || '';
+  else if (mv.category === 'Flughafen') document.getElementById('mi-airport-subtype').value = mv.source || '';
+  document.getElementById('mi-amount').value = mv.amount;
+  document.getElementById('mi-note').value = mv.note || '';
+  document.getElementById('miles-submit-btn').textContent = 'Änderungen speichern';
+  document.getElementById('miles-cancel-btn').style.display = 'block';
+  document.getElementById('mi-date').scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
+
+window.cancelEditMiles = function() {
+  editingMilesId = null;
+  document.getElementById('miles-form').reset();
+  document.getElementById('mi-source-wrap').style.display = 'none';
+  document.getElementById('mi-source').required = false;
+  document.getElementById('mi-airport-subtype-wrap').style.display = 'none';
+  document.getElementById('miles-submit-btn').textContent = 'Bewegung speichern';
+  document.getElementById('miles-cancel-btn').style.display = 'none';
+};
 
 document.getElementById('miles-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1442,18 +1675,31 @@ document.getElementById('miles-form').addEventListener('submit', async (e) => {
   if (category === 'Fremdprogramm-Umwandlung') entrySource = source;
   else if (category === 'Flughafen') entrySource = document.getElementById('mi-airport-subtype').value;
 
-  milesLog.push({
+  const entry = {
     date: document.getElementById('mi-date').value,
     category,
     source: entrySource,
     amount: parseInt(document.getElementById('mi-amount').value) || 0,
     note: document.getElementById('mi-note').value
-  });
+  };
+
+  if (editingMilesId) {
+    const idx = milesLog.findIndex(mv => mv.id === editingMilesId);
+    if (idx >= 0) {
+      // sourceTripId (falls automatisch aus einem Trip entstanden) bleibt erhalten.
+      entry.id = milesLog[idx].id;
+      if (milesLog[idx].sourceTripId) entry.sourceTripId = milesLog[idx].sourceTripId;
+      milesLog[idx] = entry;
+    } else {
+      entry.id = genId();
+      milesLog.push(entry);
+    }
+  } else {
+    entry.id = genId();
+    milesLog.push(entry);
+  }
   await saveMilesLog();
-  e.target.reset();
-  document.getElementById('mi-source-wrap').style.display = 'none';
-  document.getElementById('mi-source').required = false;
-  document.getElementById('mi-airport-subtype-wrap').style.display = 'none';
+  cancelEditMiles();
   render();
 });
 

@@ -73,6 +73,7 @@
         <div class="stat"><div class="num" id="stat-q">–</div><div class="lbl">Qualifying Points</div></div>
         <div class="stat"><div class="num" id="stat-m">–</div><div class="lbl">Meilen (Pool)</div></div>
       </div>
+      <p class="hint" id="planned-delta-display" style="display:none; margin-top:0;"></p>
 
       <div class="goal-switcher" id="goal-switcher"></div>
       <div id="goal-focus-area"></div>
@@ -203,9 +204,10 @@
         </label>
         <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-weight:600; color:var(--text);">
           <input type="checkbox" id="t-planned" style="width:auto;">
-          Geplant (noch nicht angetreten — zählt trotzdem schon in die Summe mit)
+          Geplant (noch nicht angetreten — zählt als geplantes Budget, nicht als erzielt)
         </label>
-        <button type="submit" class="btn">Trip speichern</button>
+        <button type="submit" class="btn" id="trip-submit-btn">Trip speichern</button>
+        <button type="button" class="btn secondary" id="trip-cancel-btn" style="display:none;" onclick="cancelEditTrip()">Bearbeiten abbrechen</button>
       </form>
       <div id="trip-preview" class="hint"></div>
     </div>
@@ -229,7 +231,12 @@
 
     <div class="card">
       <h2>🧾 Trip-Log <span class="badge" id="trip-count">0</span></h2>
-      <div id="trip-list"><div class="empty">Noch keine Trips erfasst.</div></div>
+      <label style="margin-top:0;">Filter: Jahr</label>
+      <select id="trip-filter-year">
+        <option value="">Alle</option>
+      </select>
+      <div id="trip-list" style="margin-top:10px;"><div class="empty">Noch keine Trips erfasst.</div></div>
+      <button type="button" class="btn secondary" style="margin-top:12px;" onclick="exportTripsCsv()">⬇️ Trip-Log als CSV exportieren</button>
     </div>
 
     <div class="card">
@@ -566,7 +573,8 @@
         <input type="number" id="mi-amount" required>
         <label>Notiz</label>
         <input type="text" id="mi-note" placeholder="optional">
-        <button type="submit" class="btn secondary">Bewegung speichern</button>
+        <button type="submit" class="btn secondary" id="miles-submit-btn">Bewegung speichern</button>
+        <button type="button" class="btn secondary" id="miles-cancel-btn" style="display:none;" onclick="cancelEditMiles()">Bearbeiten abbrechen</button>
       </form>
     </div>
 
