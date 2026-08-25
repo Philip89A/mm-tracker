@@ -74,24 +74,9 @@
         <div class="stat"><div class="num" id="stat-m">–</div><div class="lbl">Meilen (Pool)</div></div>
       </div>
 
-      <div class="goal">
-        <div class="goal-head"><span class="name">🎯 Extra Benefit: 1 eVoucher</span><span class="val" id="g700-val">– / 700 QP</span></div>
-        <div class="bar-bg"><div class="bar-fill q" id="g700-bar" style="width:0%"></div></div>
-        <div class="goal-note" id="g700-note"></div>
-      </div>
-
-      <div class="goal">
-        <div class="goal-head"><span class="name">🎯 Extra Benefit: Meilentausch-Option</span><span class="val" id="g800-val">– / 800 QP</span></div>
-        <div class="bar-bg"><div class="bar-fill q" id="g800-bar" style="width:0%"></div></div>
-        <div class="goal-note">Ab hier: bis zu 20.000 Meilen → 125 Points + 125 QP tauschbar</div>
-      </div>
-
-      <div class="goal">
-        <div class="goal-head"><span class="name">🏆 Senator</span><span class="val" id="gsen-val">– / 2.000 P · – / 1.000 QP</span></div>
-        <div class="bar-bg"><div class="bar-fill p" id="gsen-bar-p" style="width:0%"></div></div>
-        <div class="bar-bg" style="margin-top:4px;"><div class="bar-fill q" id="gsen-bar-q" style="width:0%"></div></div>
-        <div class="goal-note">Engpass ist i.d.R. QP (Lufthansa-Group-Flüge) – Points läuft meist automatisch mit</div>
-      </div>
+      <div class="goal-switcher" id="goal-switcher"></div>
+      <div id="goal-focus-area"></div>
+      <div id="goal-compact-area"></div>
     </div>
 
     <div class="card">
@@ -216,9 +201,30 @@
           <input type="checkbox" id="t-historical" style="width:auto;">
           Historisch (zählt nicht in die aktuelle Gesamtsumme/Dashboard, nur im Jahresvergleich sichtbar)
         </label>
+        <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-weight:600; color:var(--text);">
+          <input type="checkbox" id="t-planned" style="width:auto;">
+          Geplant (noch nicht angetreten — zählt trotzdem schon in die Summe mit)
+        </label>
         <button type="submit" class="btn">Trip speichern</button>
       </form>
       <div id="trip-preview" class="hint"></div>
+    </div>
+
+    <div class="card">
+      <h2>🏨 Geplante Hotelaufenthalte <span class="badge" id="planned-hotels-count">0</span></h2>
+      <p class="hint" style="margin-top:0;">Reine Merkliste, unabhängig vom Punkte-System. Sobald der Aufenthalt stattfindet, trägst du die Meilen wie gewohnt im Meilen-Tab (Kategorie "Hotel") ein.</p>
+      <form id="planned-hotel-form">
+        <label>Hotel/Ort</label>
+        <input type="text" id="ph-title" placeholder="z.B. Marriott Rom" required>
+        <div class="row2">
+          <div><label>Von</label><input type="date" id="ph-from" required></div>
+          <div><label>Bis</label><input type="date" id="ph-to"></div>
+        </div>
+        <label>Notiz</label>
+        <input type="text" id="ph-note" placeholder="optional">
+        <button type="submit" class="btn secondary">Aufenthalt speichern</button>
+      </form>
+      <div id="planned-hotels-list" style="margin-top:10px;"><div class="empty">Noch keine geplanten Aufenthalte erfasst.</div></div>
     </div>
 
     <div class="card">

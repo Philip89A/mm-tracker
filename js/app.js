@@ -10,6 +10,7 @@ const KEY_MARKETPLACE = 'marketplace';
 const KEY_SENATOR_GROUND = 'senator-ground';
 const KEY_MILES_LOG = 'miles-log';
 const KEY_REDEMPTION_IDEAS = 'redemption-ideas';
+const KEY_PLANNED_HOTELS = 'planned-hotels';
 
 let baseline = { p: 0, q: 0, m: 0 };
 let trips = [];
@@ -24,6 +25,7 @@ let senatorGround = { points: 0, qp: 0 };
 let pendingReceivedCards = []; // staged "erhaltene Karte(n)" for the marketplace form, not persisted directly
 let milesLog = [];
 let redemptionIdeas = [];
+let plannedHotels = [];
 
 const MILES_CATEGORIES = ['Flüge', 'Flughafen', 'Executive Meilen', 'CO2-Kompensation', 'Kreditkarte', 'Hotel', 'Mietwagen', 'Fahrdienst', 'Shopping', 'Parken', 'Zeitschriften-Abo', 'Reise-Buchungsportale', 'Uptrip', 'Fremdprogramm-Umwandlung', 'Kulanz/Sonstiges'];
 const AIRPORT_SUBTYPES = ['Aktionsmeilen', 'Shopping'];
@@ -43,6 +45,39 @@ const EVOUCHER_QUARTERS = [
   { label: 'Q3 (Jul–Sep)', qp: 525 },
   { label: 'Q4 (Okt–Dez)', qp: 700 }
 ];
+
+// Leiter der Jahresziele: 700 QP -> 800 QP -> Senator. Der Fokus springt
+// automatisch zum nächsten noch nicht erreichten Ziel, kann aber manuell
+// überschrieben werden (nur UI-Zustand, nicht persistiert).
+const GOAL_LADDER = [
+  {
+    key: '700', shortLabel: '700 QP', name: '🎯 Extra Benefit: 1 eVoucher',
+    reached: (t) => t.q >= 700,
+    valueText: (t) => t.q.toLocaleString('de-DE') + ' / 700 QP',
+    pct: (t) => Math.min(100, (t.q / 700) * 100),
+    note: (t) => {
+      const rem = Math.max(0, 700 - t.q);
+      return rem > 0
+        ? `Noch ${rem} QP nötig — ca. ${Math.ceil(rem/20)} Economy- oder ${Math.ceil(rem/40)} Business-Segmente (kontinental)`
+        : '✅ Erreicht — eVoucher sollte automatisch freigeschaltet sein';
+    }
+  },
+  {
+    key: '800', shortLabel: '800 QP', name: '🎯 Extra Benefit: Meilentausch-Option',
+    reached: (t) => t.q >= 800,
+    valueText: (t) => t.q.toLocaleString('de-DE') + ' / 800 QP',
+    pct: (t) => Math.min(100, (t.q / 800) * 100),
+    note: () => 'Ab hier: bis zu 20.000 Meilen → 125 Points + 125 QP tauschbar'
+  },
+  {
+    key: 'senator', shortLabel: 'Senator', name: '🏆 Senator',
+    reached: (t) => t.p >= 2000 && t.q >= 1000,
+    valueText: (t) => t.p.toLocaleString('de-DE') + ' / 2.000 P · ' + t.q.toLocaleString('de-DE') + ' / 1.000 QP',
+    pct: (t) => Math.min(100, (t.q / 1000) * 100), // QP ist meist der Engpass, daher als Balkenmaß
+    note: () => 'Engpass ist i.d.R. QP (Lufthansa-Group-Flüge) – Points läuft meist automatisch mit'
+  }
+];
+let focusedGoal = null; // null = automatisch das nächste offene Ziel
 
 function pointsForSegment(range, cls) {
   const table = {
@@ -103,6 +138,43 @@ function bar(id, val, max) {
   const pct = Math.min(100, (val / max) * 100);
   document.getElementById(id).style.width = pct + '%';
 }
+
+function autoFocusGoal(totals) {
+  const next = GOAL_LADDER.find(g => !g.reached(totals));
+  return next ? next.key : GOAL_LADDER[GOAL_LADDER.length - 1].key;
+}
+
+function renderGoalSwitcher(totals) {
+  const activeKey = focusedGoal || autoFocusGoal(totals);
+  const focusGoal = GOAL_LADDER.find(g => g.key === activeKey) || GOAL_LADDER[0];
+
+  document.getElementById('goal-switcher').innerHTML = GOAL_LADDER.map(g => {
+    const classes = ['goal-tab'];
+    if (g.key === activeKey) classes.push('active');
+    if (g.reached(totals)) classes.push('reached');
+    return `<button type="button" class="${classes.join(' ')}" onclick="setFocusedGoal('${g.key}')">${g.reached(totals) ? '✅ ' : ''}${g.shortLabel}</button>`;
+  }).join('');
+
+  const barClass = focusGoal.key === 'senator' ? 'q' : 'q';
+  document.getElementById('goal-focus-area').innerHTML = `<div class="goal-focus">
+    <div class="goal-head"><span class="name">${focusGoal.name}</span><span class="val">${focusGoal.valueText(totals)}</span></div>
+    <div class="bar-bg"><div class="bar-fill ${barClass}" style="width:${focusGoal.pct(totals)}%"></div></div>
+    <div class="goal-note">${focusGoal.note(totals)}</div>
+  </div>`;
+
+  const others = GOAL_LADDER.filter(g => g.key !== activeKey);
+  document.getElementById('goal-compact-area').innerHTML = others.map(g => `
+    <div class="goal-compact-row" onclick="setFocusedGoal('${g.key}')">
+      <span class="name">${g.reached(totals) ? '✅' : ''} ${g.shortLabel}</span>
+      <div class="bar-bg"><div class="bar-fill q" style="width:${g.pct(totals)}%"></div></div>
+      <span class="val">${g.valueText(totals)}</span>
+    </div>`).join('');
+}
+
+window.setFocusedGoal = function(key) {
+  focusedGoal = key;
+  render();
+};
 
 function daysUntil(dateStr) {
   const d = new Date(dateStr);
@@ -186,19 +258,7 @@ function render() {
     baseNoteEl.style.display = 'none';
   }
 
-  document.getElementById('g700-val').textContent = totals.q.toLocaleString('de-DE') + ' / 700 QP';
-  bar('g700-bar', totals.q, 700);
-  const remaining700 = Math.max(0, 700 - totals.q);
-  document.getElementById('g700-note').textContent = remaining700 > 0
-    ? `Noch ${remaining700} QP nötig — ca. ${Math.ceil(remaining700/20)} Economy- oder ${Math.ceil(remaining700/40)} Business-Segmente (kontinental)`
-    : '✅ Erreicht — eVoucher sollte automatisch freigeschaltet sein';
-
-  document.getElementById('g800-val').textContent = totals.q.toLocaleString('de-DE') + ' / 800 QP';
-  bar('g800-bar', totals.q, 800);
-
-  document.getElementById('gsen-val').textContent = totals.p.toLocaleString('de-DE') + ' / 2.000 P · ' + totals.q.toLocaleString('de-DE') + ' / 1.000 QP';
-  bar('gsen-bar-p', totals.p, 2000);
-  bar('gsen-bar-q', totals.q, 1000);
+  renderGoalSwitcher(totals);
 
   // Jeder Bereich läuft isoliert: ein Fehler in einem Abschnitt (z.B. durch
   // einen einzelnen fehlerhaften Datensatz) darf nie mehr verhindern, dass
@@ -217,7 +277,8 @@ function render() {
     renderUpgrades,
     renderMarketplace,
     renderMiles,
-    renderRedemptionIdeas
+    renderRedemptionIdeas,
+    renderPlannedHotels
   ].forEach(fn => {
     try { fn(); } catch (e) { console.error('Render-Fehler in ' + fn.name + ':', e); }
   });
@@ -325,6 +386,7 @@ function renderTrips() {
           <div class="route">${t.route}</div>
           <div class="meta">${t.date} · ${t.range === 'continental' ? 'Kontinental' : 'Interkont.'} · ${labelClass(t.cls)} · ${t.segments} Segm.${t.co2 > 0 ? ' · CO₂ +' + t.co2 + '%' : ''}</div>
           ${t.historical ? `<div class="meta"><span class="tag mid">🕰️ Historisch — nicht in Gesamtsumme</span></div>` : ''}
+          ${t.planned ? `<div class="meta"><span class="tag ok">📅 Geplant</span></div>` : ''}
           ${t.note ? `<div class="meta">📝 ${t.note}</div>` : ''}
         </div>
         <div class="pts">
@@ -902,6 +964,26 @@ function renderRedemptionIdeas() {
   </div>`).join('');
 }
 
+function renderPlannedHotels() {
+  document.getElementById('planned-hotels-count').textContent = plannedHotels.length;
+  const list = document.getElementById('planned-hotels-list');
+  if (plannedHotels.length === 0) {
+    list.innerHTML = '<div class="empty">Noch keine geplanten Aufenthalte erfasst.</div>';
+    return;
+  }
+  const sorted = plannedHotels.map((h, idx) => ({ ...h, idx })).sort((a, b) => new Date(a.dateFrom) - new Date(b.dateFrom));
+  list.innerHTML = sorted.map(h => `<div class="trip">
+    <div class="top">
+      <div>
+        <div class="route">${h.title}</div>
+        <div class="meta">${h.dateFrom}${h.dateTo ? ' – ' + h.dateTo : ''}</div>
+        ${h.note ? `<div class="meta">📝 ${h.note}</div>` : ''}
+      </div>
+    </div>
+    <button class="del" onclick="deletePlannedHotel(${h.idx})">entfernen</button>
+  </div>`).join('');
+}
+
 // ---------- persistence ----------
 
 async function saveBaseline() { await DB.set(KEY_BASE, baseline); }
@@ -916,6 +998,7 @@ async function saveMarketplace() { await DB.set(KEY_MARKETPLACE, marketplace); }
 async function saveSenatorGround() { await DB.set(KEY_SENATOR_GROUND, senatorGround); }
 async function saveMilesLog() { await DB.set(KEY_MILES_LOG, milesLog); }
 async function saveRedemptionIdeas() { await DB.set(KEY_REDEMPTION_IDEAS, redemptionIdeas); }
+async function savePlannedHotels() { await DB.set(KEY_PLANNED_HOTELS, plannedHotels); }
 
 async function loadAll() {
   baseline = await DB.get(KEY_BASE, baseline);
@@ -930,6 +1013,7 @@ async function loadAll() {
   senatorGround = await DB.get(KEY_SENATOR_GROUND, senatorGround);
   milesLog = await DB.get(KEY_MILES_LOG, []);
   redemptionIdeas = await DB.get(KEY_REDEMPTION_IDEAS, []);
+  plannedHotels = await DB.get(KEY_PLANNED_HOTELS, []);
 
   let inventoryMigrated = false;
   inventory.forEach(i => { if (!i.id) { i.id = genId(); inventoryMigrated = true; } });
@@ -974,6 +1058,7 @@ window.deleteMarketplace = async function(idx) { marketplace.splice(idx, 1); awa
 window.deleteUptrip = async function(idx) { uptripItems.splice(idx, 1); await saveUptrip(); render(); };
 window.deleteMilesMovement = async function(idx) { milesLog.splice(idx, 1); await saveMilesLog(); render(); };
 window.deleteRedemptionIdea = async function(idx) { redemptionIdeas.splice(idx, 1); await saveRedemptionIdeas(); render(); };
+window.deletePlannedHotel = async function(idx) { plannedHotels.splice(idx, 1); await savePlannedHotels(); render(); };
 
 window.assignSelectedCards = async function(idx) {
   const select = document.getElementById(`assign-select-${idx}`);
@@ -1088,7 +1173,8 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     segments: parseInt(document.getElementById('t-segments').value) || 1,
     co2: parseInt(document.getElementById('t-co2').value) || 0,
     note: document.getElementById('t-note').value,
-    historical: document.getElementById('t-historical').checked
+    historical: document.getElementById('t-historical').checked,
+    planned: document.getElementById('t-planned').checked
   };
   trips.push(trip);
   await saveTrips();
@@ -1384,8 +1470,21 @@ document.getElementById('redemption-form').addEventListener('submit', async (e) 
   render();
 });
 
+document.getElementById('planned-hotel-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  plannedHotels.push({
+    title: document.getElementById('ph-title').value,
+    dateFrom: document.getElementById('ph-from').value,
+    dateTo: document.getElementById('ph-to').value,
+    note: document.getElementById('ph-note').value
+  });
+  await savePlannedHotels();
+  e.target.reset();
+  render();
+});
+
 document.getElementById('reset-btn').addEventListener('click', async () => {
-  if (!confirm('Wirklich alle Trips, Aktionen, Uptrip-Daten, Fristen, Marktplatz-Tausche, Meilen-Bewegungen, Einlöse-Ideen und Berechnungen löschen? Basiswerte bleiben erhalten.')) return;
+  if (!confirm('Wirklich alle Trips, Aktionen, Uptrip-Daten, Fristen, Marktplatz-Tausche, Meilen-Bewegungen, Einlöse-Ideen, geplante Hotelaufenthalte und Berechnungen löschen? Basiswerte bleiben erhalten.')) return;
   trips = [];
   promos = [];
   uptripItems = [];
@@ -1396,6 +1495,7 @@ document.getElementById('reset-btn').addEventListener('click', async () => {
   marketplace = [];
   milesLog = [];
   redemptionIdeas = [];
+  plannedHotels = [];
   await saveTrips();
   await savePromos();
   await saveUptrip();
@@ -1406,6 +1506,7 @@ document.getElementById('reset-btn').addEventListener('click', async () => {
   await saveMarketplace();
   await saveMilesLog();
   await saveRedemptionIdeas();
+  await savePlannedHotels();
   render();
 });
 

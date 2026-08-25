@@ -74,6 +74,42 @@ header p { margin: 0; font-size: 13px; opacity: 0.75; }
 .bar-fill.q { background: linear-gradient(90deg, #6fa8dc, var(--navy2)); }
 .goal-note { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
 
+.goal-switcher { display: flex; gap: 6px; margin-bottom: 14px; }
+.goal-switcher .goal-tab {
+  flex: 1;
+  background: var(--gray-bg);
+  border: 1.5px solid transparent;
+  border-radius: 20px;
+  padding: 7px 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: center;
+}
+.goal-switcher .goal-tab.active { background: var(--navy); color: white; }
+.goal-switcher .goal-tab.reached { border-color: var(--green); }
+.goal-switcher .goal-tab.reached:not(.active) { color: var(--green); }
+
+.goal-focus { background: linear-gradient(160deg, var(--navy), var(--navy2)); border-radius: 14px; padding: 16px; color: white; }
+.goal-focus .goal-head .name { color: white; font-size: 14px; }
+.goal-focus .goal-head .val { color: rgba(255,255,255,0.75); }
+.goal-focus .bar-bg { background: rgba(255,255,255,0.18); }
+.goal-focus .goal-note { color: rgba(255,255,255,0.75); }
+
+.goal-compact-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--gray-border);
+  cursor: pointer;
+}
+.goal-compact-row:last-child { border-bottom: none; }
+.goal-compact-row .name { flex: 0 0 auto; font-size: 12px; font-weight: 600; color: var(--navy); white-space: nowrap; }
+.goal-compact-row .bar-bg { flex: 1; height: 6px; }
+.goal-compact-row .val { flex: 0 0 auto; font-size: 11px; color: var(--muted); white-space: nowrap; }
+
 .quarter-row {
   display: flex;
   justify-content: space-between;
