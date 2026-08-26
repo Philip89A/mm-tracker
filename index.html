@@ -234,7 +234,8 @@
         </div>
         <label>Notiz</label>
         <input type="text" id="ph-note" placeholder="optional">
-        <button type="submit" class="btn secondary">Aufenthalt speichern</button>
+        <button type="submit" class="btn secondary" id="planned-hotel-submit-btn">Aufenthalt speichern</button>
+        <button type="button" class="btn secondary" id="planned-hotel-cancel-btn" style="display:none;" onclick="cancelEditPlannedHotel()">Bearbeiten abbrechen</button>
       </form>
       <div id="planned-hotels-list" style="margin-top:10px;"><div class="empty">Noch keine geplanten Aufenthalte erfasst.</div></div>
     </div>

@@ -1309,7 +1309,10 @@ function renderPlannedHotels() {
       </div>
       ${hasPoints ? `<div class="pts"><div class="p" style="opacity:0.6;">📅 +${h.points || 0} P · +${h.qp || 0} QP</div></div>` : ''}
     </div>
-    <button class="del" onclick="deletePlannedHotel(${h.idx})">entfernen</button>
+    <div class="flex-between" style="margin-top:6px;">
+      <button class="del" onclick="deletePlannedHotel(${h.idx})">entfernen</button>
+      <button type="button" class="btn small secondary" onclick="startEditPlannedHotel(${h.idx})">✏️ Bearbeiten</button>
+    </div>
   </div>`;
   }).join('');
 }
@@ -1356,6 +1359,10 @@ async function loadAll() {
   let milesMigrated = false;
   milesLog.forEach(mv => { if (!mv.id) { mv.id = genId(); milesMigrated = true; } });
   if (milesMigrated) await saveMilesLog();
+
+  let plannedHotelsMigrated = false;
+  plannedHotels.forEach(h => { if (!h.id) { h.id = genId(); plannedHotelsMigrated = true; } });
+  if (plannedHotelsMigrated) await savePlannedHotels();
 
   if (migrateLegacyUptripCardNames()) await saveUptrip();
 
@@ -1887,18 +1894,50 @@ document.getElementById('redemption-form').addEventListener('submit', async (e) 
   render();
 });
 
+let editingPlannedHotelId = null;
+
+window.startEditPlannedHotel = function(idx) {
+  const h = plannedHotels[idx];
+  if (!h) return;
+  editingPlannedHotelId = h.id;
+  document.getElementById('ph-title').value = h.title || '';
+  document.getElementById('ph-from').value = h.dateFrom || '';
+  document.getElementById('ph-to').value = h.dateTo || '';
+  document.getElementById('ph-points').value = h.points || '';
+  document.getElementById('ph-qp').value = h.qp || '';
+  document.getElementById('ph-note').value = h.note || '';
+  document.getElementById('planned-hotel-submit-btn').textContent = 'Änderungen speichern';
+  document.getElementById('planned-hotel-cancel-btn').style.display = 'block';
+  document.getElementById('ph-title').scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
+
+window.cancelEditPlannedHotel = function() {
+  editingPlannedHotelId = null;
+  document.getElementById('planned-hotel-form').reset();
+  document.getElementById('planned-hotel-submit-btn').textContent = 'Aufenthalt speichern';
+  document.getElementById('planned-hotel-cancel-btn').style.display = 'none';
+};
+
 document.getElementById('planned-hotel-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  plannedHotels.push({
+  const isEdit = !!editingPlannedHotelId;
+  const hotel = {
+    id: isEdit ? editingPlannedHotelId : genId(),
     title: document.getElementById('ph-title').value,
     dateFrom: document.getElementById('ph-from').value,
     dateTo: document.getElementById('ph-to').value,
     points: parseInt(document.getElementById('ph-points').value) || 0,
     qp: parseInt(document.getElementById('ph-qp').value) || 0,
     note: document.getElementById('ph-note').value
-  });
+  };
+  if (isEdit) {
+    const idx = plannedHotels.findIndex(h => h.id === hotel.id);
+    if (idx >= 0) plannedHotels[idx] = hotel; else plannedHotels.push(hotel);
+  } else {
+    plannedHotels.push(hotel);
+  }
   await savePlannedHotels();
-  e.target.reset();
+  cancelEditPlannedHotel();
   render();
 });
 
