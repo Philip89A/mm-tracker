@@ -30,6 +30,44 @@ let plannedHotels = [];
 const MILES_CATEGORIES = ['Flüge', 'Flughafen', 'Executive Meilen', 'CO2-Kompensation', 'Kreditkarte', 'Hotel', 'Mietwagen', 'Fahrdienst', 'Shopping', 'Parken', 'Zeitschriften-Abo', 'Reise-Buchungsportale', 'Uptrip', 'Fremdprogramm-Umwandlung', 'Kulanz/Sonstiges'];
 const AIRPORT_SUBTYPES = ['Aktionsmeilen', 'Shopping'];
 
+// Kuratierte Liste bekannter/wiederkehrender Miles & More (Lufthansa Group)
+// Aktionen — kein Live-Internetzugriff (die App ist eine statische GitHub-Pages-
+// Seite ohne Backend, ein Browser-Fetch würde an CORS scheitern). Diese Liste
+// wird von Hand aktualisiert (auf Zuruf oder wenn im Chat neu recherchiert),
+// Stand dieser Version: August 2026.
+const PROMO_TEMPLATES = [
+  {
+    title: 'Discover Airlines – Doppelte Meilen (Winter)',
+    until: '2026-09-30',
+    note: 'Bis 30.09.2026 registrieren, gilt für Flüge 25.10.2026–27.03.2027, alle Klassen. Nur Meilen (keine Statuspunkte). Quelle: travel-dealz.de'
+  },
+  {
+    title: 'Frequent Traveller Status kaufen',
+    until: '2026-09-30',
+    note: '650€ oder 80.000 Meilen, um FT-Status zu sichern/verlängern, falls Senator nicht rechtzeitig erreicht wird. Quelle: pointsmag.com'
+  },
+  {
+    title: 'Jahresend-Statuspunkte-Boost (jährlich wiederkehrend)',
+    until: '',
+    note: 'In Vorjahren: bis zu +20 bis +100 Points/QP auf ausgewählte Lufthansa-Group-Flüge (kontinental Business, interkontinental Economy–First), Okt–Dez, keine Anmeldung nötig. Genauen Zeitraum für dieses Jahr auf miles-and-more.com prüfen, sobald angekündigt.'
+  },
+  {
+    title: 'Bundle&Go Meilenkauf-Bonus',
+    until: '',
+    note: 'Bis zu 50% Bonus beim Meilenkauf (ab ca. 1,17 ct/Meile) — Zeitraum wechselt regelmäßig, aktuellen Stand auf miles-and-more.com prüfen.'
+  }
+];
+
+// Vier Standard-Flugprofile (kontinental) für die "noch benötigte Flüge"-
+// Prognose: Economy/Business, jeweils ohne und mit CO2-Kompensation (80% =
+// der App-Standard, siehe t-co2-Feld im Trip-Formular).
+const FLIGHT_PROFILES = [
+  { label: 'Economy ohne CO₂-Komp.', range: 'continental', cls: 'economy', co2: 0 },
+  { label: 'Economy mit CO₂-Komp. (80%)', range: 'continental', cls: 'economy', co2: 80 },
+  { label: 'Business ohne CO₂-Komp.', range: 'continental', cls: 'business', co2: 0 },
+  { label: 'Business mit CO₂-Komp. (80%)', range: 'continental', cls: 'business', co2: 80 }
+];
+
 const SENATOR_YEAR = 2027;
 const SENATOR_QUARTERS = [
   { label: 'Q1 (Jan–Mär)', points: 500, qp: 250 },
@@ -110,6 +148,12 @@ function computeTotals() {
     p += total;
     q += total;
   });
+  // Geplante Hotelaufenthalte (z.B. Marriott) fließen hier mit ein, da diese
+  // Summe explizit für die vorausschauenden Quartals-Tracker gedacht ist.
+  plannedHotels.forEach(h => {
+    p += h.points || 0;
+    q += h.qp || 0;
+  });
   uptripItems.forEach(u => {
     const times = u.redemptionCount || 0;
     p += (u.rewardPoints || 0) * times;
@@ -127,6 +171,7 @@ function computeTotals() {
 // Prognose "inkl. bereits gebuchter Flüge" gedacht sind.
 function computeAchievedTotals() {
   let p = baseline.p, q = baseline.q, m = baseline.m;
+  const plannedTripIds = new Set(trips.filter(t => t.planned && !t.historical).map(t => t.id));
   trips.forEach(t => {
     if (t.historical || t.planned) return;
     const total = tripPoints(t);
@@ -139,30 +184,55 @@ function computeAchievedTotals() {
     q += (u.rewardQP || 0) * times;
     m += (u.rewardMeilen || 0) * times;
   });
-  milesLog.forEach(mv => { m += mv.amount || 0; });
+  // Meilen, die automatisch aus einem noch "geplanten" Trip stammen (Feld
+  // "Erhaltene Meilen" im Trip-Formular), zählen konsequenterweise ebenfalls
+  // erst als geplant, nicht als bereits erzielt — siehe computePlannedDelta().
+  milesLog.forEach(mv => {
+    if (mv.sourceTripId && plannedTripIds.has(mv.sourceTripId)) return;
+    m += mv.amount || 0;
+  });
   return { p, q, m };
 }
 
+// Alles, was schon geplant, aber noch nicht erzielt ist: geplante Flüge
+// (inkl. ihrer automatisch verknüpften Meilen) UND geplante Hotelaufenthalte
+// mit hinterlegten Points/QP (z.B. Marriott). Wird für die Dashboard-Anzeige
+// "geplantes Budget" sowie für die Prognose-Karte (renderForecast) genutzt.
 function computePlannedDelta() {
-  let p = 0, q = 0, count = 0;
+  let p = 0, q = 0, m = 0, tripCount = 0, hotelCount = 0;
+  const plannedTripIds = new Set();
   trips.forEach(t => {
     if (t.planned && !t.historical) {
       const total = tripPoints(t);
       p += total;
       q += total;
-      count += 1;
+      tripCount += 1;
+      plannedTripIds.add(t.id);
     }
   });
-  return { p, q, count };
+  milesLog.forEach(mv => {
+    if (mv.sourceTripId && plannedTripIds.has(mv.sourceTripId)) m += mv.amount || 0;
+  });
+  plannedHotels.forEach(h => {
+    if ((h.points || 0) > 0 || (h.qp || 0) > 0) {
+      p += h.points || 0;
+      q += h.qp || 0;
+      hotelCount += 1;
+    }
+  });
+  return { p, q, m, tripCount, hotelCount };
 }
 
 function senatorYearTotals() {
   const tripSum = trips
     .filter(t => t.date && t.date.startsWith(String(SENATOR_YEAR)))
     .reduce((s, t) => s + tripPoints(t), 0);
+  const hotelSum = plannedHotels
+    .filter(h => h.dateFrom && h.dateFrom.startsWith(String(SENATOR_YEAR)))
+    .reduce((s, h) => ({ p: s.p + (h.points || 0), q: s.q + (h.qp || 0) }), { p: 0, q: 0 });
   return {
-    points: tripSum + (senatorGround.points || 0),
-    qp: tripSum + (senatorGround.qp || 0)
+    points: tripSum + hotelSum.p + (senatorGround.points || 0),
+    qp: tripSum + hotelSum.q + (senatorGround.qp || 0)
   };
 }
 
@@ -180,7 +250,7 @@ function autoFocusGoal(totals) {
   return next ? next.key : GOAL_LADDER[GOAL_LADDER.length - 1].key;
 }
 
-function renderGoalSwitcher(totals) {
+function renderGoalSwitcher(totals, projectedTotals) {
   const activeKey = focusedGoal || autoFocusGoal(totals);
   const focusGoal = GOAL_LADDER.find(g => g.key === activeKey) || GOAL_LADDER[0];
 
@@ -191,20 +261,35 @@ function renderGoalSwitcher(totals) {
     return `<button type="button" class="${classes.join(' ')}" onclick="setFocusedGoal('${g.key}')">${g.reached(totals) ? '✅ ' : ''}${g.shortLabel}</button>`;
   }).join('');
 
+  // Der helle "planned"-Balken zeigt zusätzlich, wo bereits geplante (aber
+  // noch nicht erzielte) Flüge/Hotelaufenthalte einen hinbringen würden.
   const barClass = focusGoal.key === 'senator' ? 'q' : 'q';
+  const focusPlannedPct = focusGoal.pct(projectedTotals);
+  const focusPct = focusGoal.pct(totals);
   document.getElementById('goal-focus-area').innerHTML = `<div class="goal-focus">
     <div class="goal-head"><span class="name">${focusGoal.name}</span><span class="val">${focusGoal.valueText(totals)}</span></div>
-    <div class="bar-bg"><div class="bar-fill ${barClass}" style="width:${focusGoal.pct(totals)}%"></div></div>
+    <div class="bar-bg">
+      ${focusPlannedPct > focusPct ? `<div class="bar-fill ${barClass} planned" style="width:${focusPlannedPct}%"></div>` : ''}
+      <div class="bar-fill ${barClass}" style="width:${focusPct}%"></div>
+    </div>
     <div class="goal-note">${focusGoal.note(totals)}</div>
+    ${focusPlannedPct > focusPct ? `<div class="goal-note" style="opacity:0.85;">📅 inkl. geplant: ${focusGoal.valueText(projectedTotals)}</div>` : ''}
   </div>`;
 
   const others = GOAL_LADDER.filter(g => g.key !== activeKey);
-  document.getElementById('goal-compact-area').innerHTML = others.map(g => `
+  document.getElementById('goal-compact-area').innerHTML = others.map(g => {
+    const pct = g.pct(totals);
+    const plannedPct = g.pct(projectedTotals);
+    return `
     <div class="goal-compact-row" onclick="setFocusedGoal('${g.key}')">
       <span class="name">${g.reached(totals) ? '✅' : ''} ${g.shortLabel}</span>
-      <div class="bar-bg"><div class="bar-fill q" style="width:${g.pct(totals)}%"></div></div>
+      <div class="bar-bg">
+        ${plannedPct > pct ? `<div class="bar-fill q planned" style="width:${plannedPct}%"></div>` : ''}
+        <div class="bar-fill q" style="width:${pct}%"></div>
+      </div>
       <span class="val">${g.valueText(totals)}</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 window.setFocusedGoal = function(key) {
@@ -288,8 +373,13 @@ function render() {
 
   const plannedEl = document.getElementById('planned-delta-display');
   const planned = computePlannedDelta();
-  if (planned.count > 0) {
-    plannedEl.textContent = `📅 zzgl. +${planned.p.toLocaleString('de-DE')} P / +${planned.q.toLocaleString('de-DE')} QP geplantes Budget aus ${planned.count} geplanten Flug${planned.count === 1 ? '' : 'en'} (noch nicht erzielt)`;
+  const projectedTotals = { p: totals.p + planned.p, q: totals.q + planned.q, m: totals.m + planned.m };
+  if (planned.tripCount > 0 || planned.hotelCount > 0) {
+    const sourceParts = [];
+    if (planned.tripCount > 0) sourceParts.push(`${planned.tripCount} geplante${planned.tripCount === 1 ? 'r' : ''} Flug${planned.tripCount === 1 ? '' : 'e'}`);
+    if (planned.hotelCount > 0) sourceParts.push(`${planned.hotelCount} geplante${planned.hotelCount === 1 ? 'r' : ''} Hotelaufenthalt${planned.hotelCount === 1 ? '' : 'e'}`);
+    const milesPart = planned.m > 0 ? ` / +${planned.m.toLocaleString('de-DE')} Meilen` : '';
+    plannedEl.textContent = `📅 zzgl. +${planned.p.toLocaleString('de-DE')} P / +${planned.q.toLocaleString('de-DE')} QP${milesPart} geplantes Budget aus ${sourceParts.join(' + ')} (noch nicht erzielt)`;
     plannedEl.style.display = 'block';
   } else {
     plannedEl.style.display = 'none';
@@ -303,7 +393,7 @@ function render() {
     baseNoteEl.style.display = 'none';
   }
 
-  renderGoalSwitcher(totals);
+  renderGoalSwitcher(totals, projectedTotals);
 
   // Jeder Bereich läuft isoliert: ein Fehler in einem Abschnitt (z.B. durch
   // einen einzelnen fehlerhaften Datensatz) darf nie mehr verhindern, dass
@@ -314,6 +404,8 @@ function render() {
     renderSenatorTracker,
     renderTrips,
     renderYearChart,
+    renderFlightsNeeded,
+    renderPromoTemplates,
     renderPromos,
     renderUptrip,
     renderFristen,
@@ -502,6 +594,58 @@ function renderYearChart() {
       <span><span class="dot" style="background:var(--navy2);"></span>Qualifying Points</span>
     </div>`;
 }
+
+// Zeigt, wie viele zusätzliche Flug-Segmente (kontinental, 4 Profile) bis
+// zum jeweils nächsten noch offenen Ziel nötig sind — Basis ist der Stand
+// INKLUSIVE bereits geplanter Flüge/Hotelaufenthalte, da diese ja schon
+// "eingeplant" sind und nicht nochmal draufgerechnet werden sollen.
+function renderFlightsNeeded() {
+  const el = document.getElementById('flights-needed-list');
+  if (!el) return;
+  const achieved = computeAchievedTotals();
+  const planned = computePlannedDelta();
+  const projected = { p: achieved.p + planned.p, q: achieved.q + planned.q };
+  const remainingGoals = GOAL_LADDER.filter(g => !g.reached(projected));
+
+  if (remainingGoals.length === 0) {
+    el.innerHTML = '<div class="empty">🎉 Alle Ziele bereits inkl. geplanter Flüge/Aufenthalte erreicht!</div>';
+    return;
+  }
+
+  el.innerHTML = remainingGoals.map(g => {
+    const qpTarget = g.key === '700' ? 700 : (g.key === '800' ? 800 : 1000);
+    const qpShortfall = Math.max(0, qpTarget - projected.q);
+    const rows = FLIGHT_PROFILES.map(prof => {
+      const perSegment = segmentPointsWithCo2(prof.range, prof.cls, prof.co2);
+      const segments = Math.ceil(qpShortfall / perSegment);
+      return `<div class="flex-between" style="margin-top:3px; font-size:12.5px;">
+        <span>${prof.label}</span><span style="font-weight:700;">${segments} Segm.</span>
+      </div>`;
+    }).join('');
+    return `<div class="miles-cat-row">
+      <div style="font-weight:600; color:var(--navy);">${g.shortLabel} — noch ${qpShortfall.toLocaleString('de-DE')} QP</div>
+      ${rows}
+    </div>`;
+  }).join('');
+}
+
+function renderPromoTemplates() {
+  const el = document.getElementById('promo-template-list');
+  if (!el) return;
+  el.innerHTML = PROMO_TEMPLATES.map((tpl, idx) => `<div class="promo">
+      <div class="flex-between"><b>${tpl.title}</b><button type="button" class="btn small secondary" onclick="usePromoTemplate(${idx})">+ übernehmen</button></div>
+      ${tpl.until ? `<div class="d">gültig bis ${tpl.until}</div>` : '<div class="d">kein festes Ablaufdatum — Termin selbst prüfen</div>'}
+      <div>${tpl.note}</div>
+    </div>`).join('');
+}
+
+window.usePromoTemplate = async function(idx) {
+  const tpl = PROMO_TEMPLATES[idx];
+  if (!tpl) return;
+  promos.push({ title: tpl.title, until: tpl.until, note: tpl.note });
+  await savePromos();
+  render();
+};
 
 let showPastPromos = false;
 
@@ -1131,16 +1275,20 @@ function renderPlannedHotels() {
     return;
   }
   const sorted = plannedHotels.map((h, idx) => ({ ...h, idx })).sort((a, b) => new Date(a.dateFrom) - new Date(b.dateFrom));
-  list.innerHTML = sorted.map(h => `<div class="trip">
+  list.innerHTML = sorted.map(h => {
+    const hasPoints = (h.points || 0) > 0 || (h.qp || 0) > 0;
+    return `<div class="trip">
     <div class="top">
       <div>
         <div class="route">${h.title}</div>
         <div class="meta">${h.dateFrom}${h.dateTo ? ' – ' + h.dateTo : ''}</div>
         ${h.note ? `<div class="meta">📝 ${h.note}</div>` : ''}
       </div>
+      ${hasPoints ? `<div class="pts"><div class="p" style="opacity:0.6;">📅 +${h.points || 0} P · +${h.qp || 0} QP</div></div>` : ''}
     </div>
     <button class="del" onclick="deletePlannedHotel(${h.idx})">entfernen</button>
-  </div>`).join('');
+  </div>`;
+  }).join('');
 }
 
 // ---------- persistence ----------
@@ -1722,6 +1870,8 @@ document.getElementById('planned-hotel-form').addEventListener('submit', async (
     title: document.getElementById('ph-title').value,
     dateFrom: document.getElementById('ph-from').value,
     dateTo: document.getElementById('ph-to').value,
+    points: parseInt(document.getElementById('ph-points').value) || 0,
+    qp: parseInt(document.getElementById('ph-qp').value) || 0,
     note: document.getElementById('ph-note').value
   });
   await savePlannedHotels();

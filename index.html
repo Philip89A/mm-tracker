@@ -81,6 +81,12 @@
     </div>
 
     <div class="card">
+      <h2>🔮 Prognose: Noch benötigte Flüge</h2>
+      <p class="hint" style="margin-top:0;">Ausgehend vom Stand inkl. bereits geplanter Flüge &amp; Hotelaufenthalte (heller Balken oben) — wie viele zusätzliche Segmente (kontinental) bis zum jeweils nächsten Ziel noch fehlen, je nach Klasse und CO₂-Kompensation.</p>
+      <div id="flights-needed-list"></div>
+    </div>
+
+    <div class="card">
       <h2>🎯 Quartals-Tracker eVoucher 2026</h2>
       <p class="hint" id="evoucher-status-line" style="margin-top:0;"></p>
       <div id="evoucher-quarters"></div>
@@ -214,13 +220,17 @@
 
     <div class="card">
       <h2>🏨 Geplante Hotelaufenthalte <span class="badge" id="planned-hotels-count">0</span></h2>
-      <p class="hint" style="margin-top:0;">Reine Merkliste, unabhängig vom Punkte-System. Sobald der Aufenthalt stattfindet, trägst du die Meilen wie gewohnt im Meilen-Tab (Kategorie "Hotel") ein.</p>
+      <p class="hint" style="margin-top:0;">Punkte hier sind Schätzwerte (z.B. aus dem Marriott-Umwandlungsrechner) und zählen als "geplant", nicht als erzielt — sie fließen ins geplante Budget und die Prognose ein. Sobald der Aufenthalt stattfindet, trägst du die tatsächlichen Meilen wie gewohnt im Meilen-Tab (Kategorie "Hotel") final ein.</p>
       <form id="planned-hotel-form">
         <label>Hotel/Ort</label>
         <input type="text" id="ph-title" placeholder="z.B. Marriott Rom" required>
         <div class="row2">
           <div><label>Von</label><input type="date" id="ph-from" required></div>
           <div><label>Bis</label><input type="date" id="ph-to"></div>
+        </div>
+        <div class="row2">
+          <div><label>Points (geplant, optional)</label><input type="number" id="ph-points" min="0" placeholder="0"></div>
+          <div><label>Qualifying Points (geplant, optional)</label><input type="number" id="ph-qp" min="0" placeholder="0"></div>
         </div>
         <label>Notiz</label>
         <input type="text" id="ph-note" placeholder="optional">
@@ -623,6 +633,12 @@
 
   <!-- TAB: MEHR -->
   <section id="tab-mehr" class="section">
+
+    <div class="card">
+      <h2>🔎 Aktions-Vorlagen</h2>
+      <p class="hint" style="margin-top:0;">Kuratierte Liste bekannter/wiederkehrender Miles &amp; More (Lufthansa Group) Aktionen — kein Live-Internetzugriff möglich (statische App ohne Backend), daher von Hand gepflegt. Per Klick direkt als eigene Aktion übernehmen und bei Bedarf unten anpassen.</p>
+      <div id="promo-template-list"></div>
+    </div>
 
     <div class="card">
       <h2>🔥 Lohnenswerte Aktionen</h2>
