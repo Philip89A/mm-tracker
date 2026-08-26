@@ -111,8 +111,18 @@ const GOAL_LADDER = [
     key: 'senator', shortLabel: 'Senator', name: '🏆 Senator',
     reached: (t) => t.p >= 2000 && t.q >= 1000,
     valueText: (t) => t.p.toLocaleString('de-DE') + ' / 2.000 P · ' + t.q.toLocaleString('de-DE') + ' / 1.000 QP',
-    pct: (t) => Math.min(100, (t.q / 1000) * 100), // QP ist meist der Engpass, daher als Balkenmaß
-    note: () => 'Engpass ist i.d.R. QP (Lufthansa-Group-Flüge) – Points läuft meist automatisch mit'
+    // Bei fast ausschließlichem Lufthansa-Group-Sammeln wachsen P und QP aus
+    // Flügen 1:1 — das 2.000-Points-Ziel ist dann de facto das doppelte des
+    // 1.000-QP-Ziels, Points also meist die tatsächliche Engstelle, nicht QP.
+    // Der Balken bildet daher den jeweils weiter entfernten (bindenden) Wert ab.
+    pct: (t) => Math.min(100, Math.min((t.p / 2000) * 100, (t.q / 1000) * 100)),
+    note: (t) => {
+      const pRem = Math.max(0, 2000 - t.p);
+      const qRem = Math.max(0, 1000 - t.q);
+      if (pRem === 0 && qRem === 0) return '✅ Erreicht';
+      const bottleneck = pRem >= qRem ? 'Points' : 'Qualifying Points';
+      return `Engpass aktuell: ${bottleneck} (noch ${pRem.toLocaleString('de-DE')} P / ${qRem.toLocaleString('de-DE')} QP offen) — bei fast ausschließlichem Lufthansa-Group-Sammeln ist meist Points die eigentliche Hürde, da 2.000 P das doppelte Ziel von 1.000 QP sind.`;
+    }
   }
 ];
 let focusedGoal = null; // null = automatisch das nächste offene Ziel
@@ -613,17 +623,30 @@ function renderFlightsNeeded() {
   }
 
   el.innerHTML = remainingGoals.map(g => {
-    const qpTarget = g.key === '700' ? 700 : (g.key === '800' ? 800 : 1000);
-    const qpShortfall = Math.max(0, qpTarget - projected.q);
+    // Bei Senator sind Points (2.000-Ziel) und QP (1.000-Ziel) beide bindend —
+    // da Lufthansa-Group-Flüge P und QP 1:1 draufrechnen, ist meist Points
+    // (das doppelte Ziel) die tatsächliche Engstelle. Also den jeweils
+    // größeren Rückstand als Basis für die Segment-Berechnung nehmen.
+    let shortfall, shortfallLabel;
+    if (g.key === 'senator') {
+      const pRem = Math.max(0, 2000 - projected.p);
+      const qRem = Math.max(0, 1000 - projected.q);
+      shortfall = Math.max(pRem, qRem);
+      shortfallLabel = `${shortfall.toLocaleString('de-DE')} ${pRem >= qRem ? 'Points' : 'QP'}`;
+    } else {
+      const qpTarget = g.key === '700' ? 700 : 800;
+      shortfall = Math.max(0, qpTarget - projected.q);
+      shortfallLabel = `${shortfall.toLocaleString('de-DE')} QP`;
+    }
     const rows = FLIGHT_PROFILES.map(prof => {
       const perSegment = segmentPointsWithCo2(prof.range, prof.cls, prof.co2);
-      const segments = Math.ceil(qpShortfall / perSegment);
+      const segments = Math.ceil(shortfall / perSegment);
       return `<div class="flex-between" style="margin-top:3px; font-size:12.5px;">
         <span>${prof.label}</span><span style="font-weight:700;">${segments} Segm.</span>
       </div>`;
     }).join('');
     return `<div class="miles-cat-row">
-      <div style="font-weight:600; color:var(--navy);">${g.shortLabel} — noch ${qpShortfall.toLocaleString('de-DE')} QP</div>
+      <div style="font-weight:600; color:var(--navy);">${g.shortLabel} — noch ${shortfallLabel}</div>
       ${rows}
     </div>`;
   }).join('');
