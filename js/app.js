@@ -150,17 +150,30 @@ function segmentPointsWithCo2(range, cls, co2) {
   return base + bonus;
 }
 
+// Points/QP werden pro Kalenderjahr (= Miles&More-Programmjahr in diesem Modell)
+// zurückgesetzt — nur Meilen sind eine dauerhafte, jahresübergreifende
+// Währung. Daher zählen für "das laufende Jahr" nur Flüge/Hotels, die auch
+// tatsächlich in diesem Jahr datiert sind; ein für 2027 eingetragener Trip/
+// Hotelaufenthalt darf 2026 nicht beeinflussen (und umgekehrt).
+function currentProgramYear() {
+  return String(new Date().getFullYear());
+}
+
 function computeTotals() {
   let p = baseline.p, q = baseline.q, m = baseline.m;
+  const year = currentProgramYear();
   trips.forEach(t => {
     if (t.historical) return; // nachgetragene alte Flüge zählen bewusst nicht in die aktuelle Summe
+    if (!t.date || !t.date.startsWith(year)) return; // sauberer Jahres-Cut für Points/QP
     const total = tripPoints(t);
     p += total;
     q += total;
   });
   // Geplante Hotelaufenthalte (z.B. Marriott) fließen hier mit ein, da diese
-  // Summe explizit für die vorausschauenden Quartals-Tracker gedacht ist.
+  // Summe explizit für die vorausschauenden Quartals-Tracker gedacht ist —
+  // aber auch hier nur, wenn sie ins laufende Jahr fallen.
   plannedHotels.forEach(h => {
+    if (!h.dateFrom || !h.dateFrom.startsWith(year)) return;
     p += h.points || 0;
     q += h.qp || 0;
   });
@@ -181,9 +194,11 @@ function computeTotals() {
 // Prognose "inkl. bereits gebuchter Flüge" gedacht sind.
 function computeAchievedTotals() {
   let p = baseline.p, q = baseline.q, m = baseline.m;
+  const year = currentProgramYear();
   const plannedTripIds = new Set(trips.filter(t => t.planned && !t.historical).map(t => t.id));
   trips.forEach(t => {
     if (t.historical || t.planned) return;
+    if (!t.date || !t.date.startsWith(year)) return; // sauberer Jahres-Cut für Points/QP
     const total = tripPoints(t);
     p += total;
     q += total;
@@ -210,9 +225,10 @@ function computeAchievedTotals() {
 // "geplantes Budget" sowie für die Prognose-Karte (renderForecast) genutzt.
 function computePlannedDelta() {
   let p = 0, q = 0, m = 0, tripCount = 0, hotelCount = 0;
+  const year = currentProgramYear();
   const plannedTripIds = new Set();
   trips.forEach(t => {
-    if (t.planned && !t.historical) {
+    if (t.planned && !t.historical && t.date && t.date.startsWith(year)) {
       const total = tripPoints(t);
       p += total;
       q += total;
@@ -224,7 +240,7 @@ function computePlannedDelta() {
     if (mv.sourceTripId && plannedTripIds.has(mv.sourceTripId)) m += mv.amount || 0;
   });
   plannedHotels.forEach(h => {
-    if ((h.points || 0) > 0 || (h.qp || 0) > 0) {
+    if (h.dateFrom && h.dateFrom.startsWith(year) && ((h.points || 0) > 0 || (h.qp || 0) > 0)) {
       p += h.points || 0;
       q += h.qp || 0;
       hotelCount += 1;
@@ -246,6 +262,35 @@ function senatorYearTotals() {
   };
 }
 
+// Das Senator-Ziel ist explizit an SENATOR_YEAR (2027) gebunden, nicht ans
+// laufende Jahr — seine Fortschrittsanzeige muss daher immer mit
+// senatorYearTotals() (bereits sauber auf 2027 begrenzt) rechnen, während
+// die 700/800-QP-Zwischenziele am laufenden Jahr (computeAchievedTotals/
+// computeTotals) hängen. Ohne diese Trennung würde ein für 2027 geplanter
+// Trip/Hotelaufenthalt sonst über die gemeinsame Zielleiter ins laufende
+// Jahr durchschlagen.
+function goalAchievedTotals(key) {
+  if (key === 'senator') {
+    const st = senatorYearTotals();
+    return { p: st.points, q: st.qp, m: 0 };
+  }
+  return computeAchievedTotals();
+}
+
+function goalProjectedTotals(key) {
+  if (key === 'senator') {
+    // senatorYearTotals() zählt für 2027 ohnehin alle Flüge/Hotels unabhängig
+    // vom "geplant"-Flag — aus heutiger Sicht (2026) ist für ein zukünftiges
+    // Jahr per Definition noch alles "geplant", Achieved und Projected fallen
+    // hier zusammen.
+    const st = senatorYearTotals();
+    return { p: st.points, q: st.qp, m: 0 };
+  }
+  const a = computeAchievedTotals();
+  const d = computePlannedDelta();
+  return { p: a.p + d.p, q: a.q + d.q, m: a.m + d.m };
+}
+
 function labelClass(c) {
   return { economy: 'Economy', premium: 'Premium Eco.', business: 'Business', first: 'First' }[c];
 }
@@ -255,49 +300,54 @@ function bar(id, val, max) {
   document.getElementById(id).style.width = pct + '%';
 }
 
-function autoFocusGoal(totals) {
-  const next = GOAL_LADDER.find(g => !g.reached(totals));
+function autoFocusGoal() {
+  const next = GOAL_LADDER.find(g => !g.reached(goalAchievedTotals(g.key)));
   return next ? next.key : GOAL_LADDER[GOAL_LADDER.length - 1].key;
 }
 
-function renderGoalSwitcher(totals, projectedTotals) {
-  const activeKey = focusedGoal || autoFocusGoal(totals);
+function renderGoalSwitcher() {
+  const activeKey = focusedGoal || autoFocusGoal();
   const focusGoal = GOAL_LADDER.find(g => g.key === activeKey) || GOAL_LADDER[0];
+  const focusTotals = goalAchievedTotals(activeKey);
+  const focusProjected = goalProjectedTotals(activeKey);
 
   document.getElementById('goal-switcher').innerHTML = GOAL_LADDER.map(g => {
+    const t = goalAchievedTotals(g.key);
     const classes = ['goal-tab'];
     if (g.key === activeKey) classes.push('active');
-    if (g.reached(totals)) classes.push('reached');
-    return `<button type="button" class="${classes.join(' ')}" onclick="setFocusedGoal('${g.key}')">${g.reached(totals) ? '✅ ' : ''}${g.shortLabel}</button>`;
+    if (g.reached(t)) classes.push('reached');
+    return `<button type="button" class="${classes.join(' ')}" onclick="setFocusedGoal('${g.key}')">${g.reached(t) ? '✅ ' : ''}${g.shortLabel}</button>`;
   }).join('');
 
   // Der helle "planned"-Balken zeigt zusätzlich, wo bereits geplante (aber
   // noch nicht erzielte) Flüge/Hotelaufenthalte einen hinbringen würden.
-  const barClass = focusGoal.key === 'senator' ? 'q' : 'q';
-  const focusPlannedPct = focusGoal.pct(projectedTotals);
-  const focusPct = focusGoal.pct(totals);
+  const barClass = 'q';
+  const focusPlannedPct = focusGoal.pct(focusProjected);
+  const focusPct = focusGoal.pct(focusTotals);
   document.getElementById('goal-focus-area').innerHTML = `<div class="goal-focus">
-    <div class="goal-head"><span class="name">${focusGoal.name}</span><span class="val">${focusGoal.valueText(totals)}</span></div>
+    <div class="goal-head"><span class="name">${focusGoal.name}</span><span class="val">${focusGoal.valueText(focusTotals)}</span></div>
     <div class="bar-bg">
       ${focusPlannedPct > focusPct ? `<div class="bar-fill ${barClass} planned" style="width:${focusPlannedPct}%"></div>` : ''}
       <div class="bar-fill ${barClass}" style="width:${focusPct}%"></div>
     </div>
-    <div class="goal-note">${focusGoal.note(totals)}</div>
-    ${focusPlannedPct > focusPct ? `<div class="goal-note" style="opacity:0.85;">📅 inkl. geplant: ${focusGoal.valueText(projectedTotals)}</div>` : ''}
+    <div class="goal-note">${focusGoal.note(focusTotals)}</div>
+    ${focusPlannedPct > focusPct ? `<div class="goal-note" style="opacity:0.85;">📅 inkl. geplant: ${focusGoal.valueText(focusProjected)}</div>` : ''}
   </div>`;
 
   const others = GOAL_LADDER.filter(g => g.key !== activeKey);
   document.getElementById('goal-compact-area').innerHTML = others.map(g => {
-    const pct = g.pct(totals);
-    const plannedPct = g.pct(projectedTotals);
+    const t = goalAchievedTotals(g.key);
+    const proj = goalProjectedTotals(g.key);
+    const pct = g.pct(t);
+    const plannedPct = g.pct(proj);
     return `
     <div class="goal-compact-row" onclick="setFocusedGoal('${g.key}')">
-      <span class="name">${g.reached(totals) ? '✅' : ''} ${g.shortLabel}</span>
+      <span class="name">${g.reached(t) ? '✅' : ''} ${g.shortLabel}</span>
       <div class="bar-bg">
         ${plannedPct > pct ? `<div class="bar-fill q planned" style="width:${plannedPct}%"></div>` : ''}
         <div class="bar-fill q" style="width:${pct}%"></div>
       </div>
-      <span class="val">${g.valueText(totals)}</span>
+      <span class="val">${g.valueText(t)}</span>
     </div>`;
   }).join('');
 }
@@ -383,7 +433,6 @@ function render() {
 
   const plannedEl = document.getElementById('planned-delta-display');
   const planned = computePlannedDelta();
-  const projectedTotals = { p: totals.p + planned.p, q: totals.q + planned.q, m: totals.m + planned.m };
   if (planned.tripCount > 0 || planned.hotelCount > 0) {
     const sourceParts = [];
     if (planned.tripCount > 0) sourceParts.push(`${planned.tripCount} geplante${planned.tripCount === 1 ? 'r' : ''} Flug${planned.tripCount === 1 ? '' : 'e'}`);
@@ -403,7 +452,7 @@ function render() {
     baseNoteEl.style.display = 'none';
   }
 
-  renderGoalSwitcher(totals, projectedTotals);
+  renderGoalSwitcher();
 
   // Jeder Bereich läuft isoliert: ein Fehler in einem Abschnitt (z.B. durch
   // einen einzelnen fehlerhaften Datensatz) darf nie mehr verhindern, dass
@@ -446,7 +495,7 @@ function renderEvoucherTracker() {
   }
 
   document.getElementById('evoucher-status-line').textContent =
-    `Aktueller Stand ${EVOUCHER_YEAR}: ${totals.q.toLocaleString('de-DE')} QP${yearStateText}`;
+    `Aktueller Stand ${EVOUCHER_YEAR}: ${totals.p.toLocaleString('de-DE')} Points · ${totals.q.toLocaleString('de-DE')} QP${yearStateText}`;
 
   document.getElementById('evoucher-quarters').innerHTML = EVOUCHER_QUARTERS.map((q, idx) => {
     const isCurrent = currentQuarterIdx === idx;
@@ -460,6 +509,9 @@ function renderEvoucherTracker() {
     else if (shortfall <= q.qp * 0.15) { statusClass = 'mid'; statusText = `⚠️ knapp dahinter (−${shortfall.toLocaleString('de-DE')} QP)`; }
     else { statusClass = 'low'; statusText = `🔴 deutlich hinten (−${shortfall.toLocaleString('de-DE')} QP)`; }
 
+    // Der eVoucher-Schwellenwert (700 QP) ist per Programmregel echt QP-only,
+    // es gibt kein offizielles Points-Ziel dafür — Points wird hier trotzdem
+    // als reine Zusatz-Info mitgeführt, ohne eigene Ampel/Haken.
     return `<div class="quarter-row ${isCurrent ? 'current' : ''} ${statusClass}">
       <div>
         <div class="qlabel">${q.label}${isCurrent ? ' 👉' : ''}</div>
@@ -467,6 +519,7 @@ function renderEvoucherTracker() {
       </div>
       <div>
         <div class="qstatus">${statusText}</div>
+        <div class="qqp">Points aktuell: ${totals.p.toLocaleString('de-DE')}</div>
       </div>
     </div>`;
   }).join('');
@@ -493,14 +546,27 @@ function renderSenatorTracker() {
     const isCurrent = currentQuarterIdx === idx;
     const isDue = currentQuarterIdx !== null && idx <= currentQuarterIdx;
 
+    // Wie beim Jahresziel-Fokus (GOAL_LADDER) wird nicht pauschal Points ODER
+    // QP als Engpass angenommen, sondern pro Quartal der tatsächlich weiter
+    // entfernte (relativ zum jeweiligen Ziel) Wert ermittelt — bei fast
+    // ausschließlichem Lufthansa-Group-Sammeln ist das i.d.R. Points.
+    const pShortfall = q.points - totals.points;
+    const qShortfall = q.qp - totals.qp;
+    const pSeverity = q.points > 0 ? pShortfall / q.points : 0;
+    const qSeverity = q.qp > 0 ? qShortfall / q.qp : 0;
+    const worseIsPoints = pSeverity >= qSeverity;
+    const shortfall = worseIsPoints ? pShortfall : qShortfall;
+    const shortfallTarget = worseIsPoints ? q.points : q.qp;
+    const shortfallLabel = worseIsPoints ? 'Points' : 'QP';
+
     let statusClass = '';
     let statusText = 'noch nicht dran';
     if (isDue) {
-      const shortfall = q.points - totals.points;
       if (shortfall <= 0) { statusClass = 'ok'; statusText = '✅ im Soll'; }
-      else if (shortfall <= q.points * 0.15) { statusClass = 'mid'; statusText = `⚠️ knapp dahinter (−${shortfall.toLocaleString('de-DE')} Points)`; }
-      else { statusClass = 'low'; statusText = `🔴 deutlich hinten (−${shortfall.toLocaleString('de-DE')} Points)`; }
+      else if (shortfall <= shortfallTarget * 0.15) { statusClass = 'mid'; statusText = `⚠️ knapp dahinter (−${shortfall.toLocaleString('de-DE')} ${shortfallLabel})`; }
+      else { statusClass = 'low'; statusText = `🔴 deutlich hinten (−${shortfall.toLocaleString('de-DE')} ${shortfallLabel})`; }
     }
+    const pOk = totals.points >= q.points;
     const qpOk = totals.qp >= q.qp;
 
     return `<div class="quarter-row ${isCurrent ? 'current' : ''} ${statusClass}">
@@ -510,6 +576,7 @@ function renderSenatorTracker() {
       </div>
       <div>
         <div class="qstatus">${statusText}</div>
+        <div class="qqp">Points: ${totals.points.toLocaleString('de-DE')} / ${q.points.toLocaleString('de-DE')} ${isDue ? (pOk ? '✓' : '⚠️') : ''}</div>
         <div class="qqp">QP: ${totals.qp.toLocaleString('de-DE')} / ${q.qp.toLocaleString('de-DE')} ${isDue ? (qpOk ? '✓' : '⚠️') : ''}</div>
       </div>
     </div>`;
@@ -612,10 +679,10 @@ function renderYearChart() {
 function renderFlightsNeeded() {
   const el = document.getElementById('flights-needed-list');
   if (!el) return;
-  const achieved = computeAchievedTotals();
-  const planned = computePlannedDelta();
-  const projected = { p: achieved.p + planned.p, q: achieved.q + planned.q };
-  const remainingGoals = GOAL_LADDER.filter(g => !g.reached(projected));
+  // Pro Ziel eigene Basis: 700/800 QP hängen am laufenden Jahr, Senator ist
+  // fest an SENATOR_YEAR gebunden (siehe goalProjectedTotals) — ein für 2027
+  // geplanter Trip/Hotelaufenthalt darf die 700/800-Prognose nicht verändern.
+  const remainingGoals = GOAL_LADDER.filter(g => !g.reached(goalProjectedTotals(g.key)));
 
   if (remainingGoals.length === 0) {
     el.innerHTML = '<div class="empty">🎉 Alle Ziele bereits inkl. geplanter Flüge/Aufenthalte erreicht!</div>';
@@ -623,6 +690,7 @@ function renderFlightsNeeded() {
   }
 
   el.innerHTML = remainingGoals.map(g => {
+    const projected = goalProjectedTotals(g.key);
     // Bei Senator sind Points (2.000-Ziel) und QP (1.000-Ziel) beide bindend —
     // da Lufthansa-Group-Flüge P und QP 1:1 draufrechnen, ist meist Points
     // (das doppelte Ziel) die tatsächliche Engstelle. Also den jeweils
