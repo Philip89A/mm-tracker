@@ -90,6 +90,7 @@ const EVOUCHER_QUARTERS = [
 const GOAL_LADDER = [
   {
     key: '700', shortLabel: '700 QP', name: '🎯 Extra Benefit: 1 eVoucher',
+    year: () => currentProgramYear(), // läuft am laufenden Jahr, nicht an einem festen Zieljahr
     reached: (t) => t.q >= 700,
     valueText: (t) => t.q.toLocaleString('de-DE') + ' / 700 QP',
     pct: (t) => Math.min(100, (t.q / 700) * 100),
@@ -102,6 +103,7 @@ const GOAL_LADDER = [
   },
   {
     key: '800', shortLabel: '800 QP', name: '🎯 Extra Benefit: Meilentausch-Option',
+    year: () => currentProgramYear(),
     reached: (t) => t.q >= 800,
     valueText: (t) => t.q.toLocaleString('de-DE') + ' / 800 QP',
     pct: (t) => Math.min(100, (t.q / 800) * 100),
@@ -109,6 +111,7 @@ const GOAL_LADDER = [
   },
   {
     key: 'senator', shortLabel: 'Senator', name: '🏆 Senator',
+    year: () => String(SENATOR_YEAR), // fest an das Zieljahr gebunden, nicht ans laufende Jahr
     reached: (t) => t.p >= 2000 && t.q >= 1000,
     valueText: (t) => t.p.toLocaleString('de-DE') + ' / 2.000 P · ' + t.q.toLocaleString('de-DE') + ' / 1.000 QP',
     // Bei fast ausschließlichem Lufthansa-Group-Sammeln wachsen P und QP aus
@@ -159,6 +162,13 @@ function currentProgramYear() {
   return String(new Date().getFullYear());
 }
 
+// Wie viele der Einlösungen einer Uptrip-Kollektion in einem bestimmten Jahr
+// stattfanden — Grundlage für den Points/QP-Jahres-Cut (Meilen bleiben
+// unabhängig davon vollständig zählbar, siehe redemptionCount ungefiltert).
+function uptripRedemptionsInYear(u, year) {
+  return (u.redemptionDates || []).filter(d => d && d.startsWith(year)).length;
+}
+
 function computeTotals() {
   let p = baseline.p, q = baseline.q, m = baseline.m;
   const year = currentProgramYear();
@@ -178,10 +188,10 @@ function computeTotals() {
     q += h.qp || 0;
   });
   uptripItems.forEach(u => {
-    const times = u.redemptionCount || 0;
-    p += (u.rewardPoints || 0) * times;
-    q += (u.rewardQP || 0) * times;
-    m += (u.rewardMeilen || 0) * times;
+    const timesThisYear = uptripRedemptionsInYear(u, year);
+    p += (u.rewardPoints || 0) * timesThisYear;
+    q += (u.rewardQP || 0) * timesThisYear;
+    m += (u.rewardMeilen || 0) * (u.redemptionCount || 0); // Meilen bleiben jahresübergreifend zählbar
   });
   milesLog.forEach(mv => { m += mv.amount || 0; });
   return { p, q, m };
@@ -204,10 +214,10 @@ function computeAchievedTotals() {
     q += total;
   });
   uptripItems.forEach(u => {
-    const times = u.redemptionCount || 0;
-    p += (u.rewardPoints || 0) * times;
-    q += (u.rewardQP || 0) * times;
-    m += (u.rewardMeilen || 0) * times;
+    const timesThisYear = uptripRedemptionsInYear(u, year);
+    p += (u.rewardPoints || 0) * timesThisYear;
+    q += (u.rewardQP || 0) * timesThisYear;
+    m += (u.rewardMeilen || 0) * (u.redemptionCount || 0); // Meilen bleiben jahresübergreifend zählbar
   });
   // Meilen, die automatisch aus einem noch "geplanten" Trip stammen (Feld
   // "Erhaltene Meilen" im Trip-Formular), zählen konsequenterweise ebenfalls
@@ -316,7 +326,7 @@ function renderGoalSwitcher() {
     const classes = ['goal-tab'];
     if (g.key === activeKey) classes.push('active');
     if (g.reached(t)) classes.push('reached');
-    return `<button type="button" class="${classes.join(' ')}" onclick="setFocusedGoal('${g.key}')">${g.reached(t) ? '✅ ' : ''}${g.shortLabel}</button>`;
+    return `<button type="button" class="${classes.join(' ')}" onclick="setFocusedGoal('${g.key}')">${g.reached(t) ? '✅ ' : ''}${g.shortLabel} '${g.year().slice(-2)}</button>`;
   }).join('');
 
   // Der helle "planned"-Balken zeigt zusätzlich, wo bereits geplante (aber
@@ -325,7 +335,7 @@ function renderGoalSwitcher() {
   const focusPlannedPct = focusGoal.pct(focusProjected);
   const focusPct = focusGoal.pct(focusTotals);
   document.getElementById('goal-focus-area').innerHTML = `<div class="goal-focus">
-    <div class="goal-head"><span class="name">${focusGoal.name}</span><span class="val">${focusGoal.valueText(focusTotals)}</span></div>
+    <div class="goal-head"><span class="name">${focusGoal.name} <span style="opacity:0.7; font-weight:400;">(Jahr ${focusGoal.year()})</span></span><span class="val">${focusGoal.valueText(focusTotals)}</span></div>
     <div class="bar-bg">
       ${focusPlannedPct > focusPct ? `<div class="bar-fill ${barClass} planned" style="width:${focusPlannedPct}%"></div>` : ''}
       <div class="bar-fill ${barClass}" style="width:${focusPct}%"></div>
@@ -342,7 +352,7 @@ function renderGoalSwitcher() {
     const plannedPct = g.pct(proj);
     return `
     <div class="goal-compact-row" onclick="setFocusedGoal('${g.key}')">
-      <span class="name">${g.reached(t) ? '✅' : ''} ${g.shortLabel}</span>
+      <span class="name">${g.reached(t) ? '✅' : ''} ${g.shortLabel} '${g.year().slice(-2)}</span>
       <div class="bar-bg">
         ${plannedPct > pct ? `<div class="bar-fill q planned" style="width:${plannedPct}%"></div>` : ''}
         <div class="bar-fill q" style="width:${pct}%"></div>
@@ -714,7 +724,7 @@ function renderFlightsNeeded() {
       </div>`;
     }).join('');
     return `<div class="miles-cat-row">
-      <div style="font-weight:600; color:var(--navy);">${g.shortLabel} — noch ${shortfallLabel}</div>
+      <div style="font-weight:600; color:var(--navy);">${g.shortLabel} <span style="font-weight:400; color:var(--muted);">(Jahr ${g.year()})</span> — noch ${shortfallLabel}</div>
       ${rows}
     </div>`;
   }).join('');
@@ -966,11 +976,16 @@ function renderUptrip() {
 
   const totalRedemptions = uptripItems.reduce((s, u) => s + (u.redemptionCount || 0), 0);
   if (totalRedemptions > 0) {
-    const sumP = uptripItems.reduce((s, u) => s + (u.rewardPoints || 0) * (u.redemptionCount || 0), 0);
-    const sumQ = uptripItems.reduce((s, u) => s + (u.rewardQP || 0) * (u.redemptionCount || 0), 0);
+    const year = currentProgramYear();
+    // Points/QP im Dashboard sind jahresgebunden — hier daher nur die
+    // Einlösungen aus dem laufenden Jahr zeigen, damit die Zahl zur
+    // tatsächlichen Dashboard-Summe passt. Meilen bleiben all-time, da sie
+    // sich nie zurücksetzen.
+    const sumP = uptripItems.reduce((s, u) => s + (u.rewardPoints || 0) * uptripRedemptionsInYear(u, year), 0);
+    const sumQ = uptripItems.reduce((s, u) => s + (u.rewardQP || 0) * uptripRedemptionsInYear(u, year), 0);
     const sumM = uptripItems.reduce((s, u) => s + (u.rewardMeilen || 0) * (u.redemptionCount || 0), 0);
     document.getElementById('uptrip-summary').textContent =
-      `Bisher ${totalRedemptions}× eingelöst — insgesamt +${sumP} Points, +${sumQ} QP, +${sumM} Meilen (bereits im Dashboard enthalten)`;
+      `Bisher ${totalRedemptions}× eingelöst — davon ${year}: +${sumP} Points, +${sumQ} QP · insgesamt +${sumM} Meilen (bereits im Dashboard enthalten)`;
   } else {
     document.getElementById('uptrip-summary').textContent = '';
   }
@@ -1432,6 +1447,22 @@ async function loadAll() {
   plannedHotels.forEach(h => { if (!h.id) { h.id = genId(); plannedHotelsMigrated = true; } });
   if (plannedHotelsMigrated) await savePlannedHotels();
 
+  let uptripDatesMigrated = false;
+  uptripItems.forEach(u => {
+    const count = u.redemptionCount || 0;
+    if (count > 0 && (!u.redemptionDates || u.redemptionDates.length !== count)) {
+      // Für Alt-Einlösungen kennen wir nur das Datum der jeweils letzten
+      // Einlösung (redeemedDate), nicht das jeder einzelnen — als bester
+      // verfügbarer Näherungswert wird es für alle bisherigen Einlösungen
+      // übernommen (wirkt sich nur auf sehr alte, mehrfach eingelöste
+      // Kollektionen aus, deren Einlösungen tatsächlich in unterschiedlichen
+      // Jahren lagen).
+      u.redemptionDates = Array.from({ length: count }, () => u.redeemedDate || currentProgramYear() + '-01-01');
+      uptripDatesMigrated = true;
+    }
+  });
+  if (uptripDatesMigrated) await saveUptrip();
+
   if (migrateLegacyUptripCardNames()) await saveUptrip();
 
   document.getElementById('base-p').value = baseline.p;
@@ -1529,6 +1560,11 @@ window.redeemUptrip = async function(idx) {
 
   u.redemptionCount = redemptionCount + 1;
   u.redeemedDate = new Date().toISOString().slice(0, 10);
+  // Ein Datum pro Einlösung merken (nicht nur das letzte), damit Points/QP
+  // aus Uptrip-Prämien denselben Jahres-Cut respektieren wie Trips/Hotels —
+  // nur Meilen bleiben jahresübergreifend gültig.
+  u.redemptionDates = u.redemptionDates || [];
+  u.redemptionDates.push(u.redeemedDate);
   u.assignedCards = [];
 
   uptripItems[idx] = u;
@@ -1541,6 +1577,7 @@ window.undoUptrip = async function(idx) {
   if (!u || !(u.redemptionCount > 0)) return;
   if (!confirm(`Letzte Einlösung von "${u.name}" rückgängig machen? Nur die Points/QP/Meilen dieser Einlösung werden aus dem Dashboard wieder abgezogen. Die dafür verbrauchten Karten wurden bereits aus dem Inventar entfernt und werden NICHT automatisch zurückgebucht — das musst du manuell im Karteninventar korrigieren, falls nötig.`)) return;
   u.redemptionCount -= 1;
+  if (u.redemptionDates && u.redemptionDates.length) u.redemptionDates.pop();
   uptripItems[idx] = u;
   await saveUptrip();
   render();
