@@ -11,6 +11,7 @@ const KEY_SENATOR_GROUND = 'senator-ground';
 const KEY_MILES_LOG = 'miles-log';
 const KEY_REDEMPTION_IDEAS = 'redemption-ideas';
 const KEY_PLANNED_HOTELS = 'planned-hotels';
+const KEY_YEAR_ARCHIVE = 'year-archive';
 
 let baseline = { p: 0, q: 0, m: 0 };
 let trips = [];
@@ -26,6 +27,7 @@ let pendingReceivedCards = []; // staged "erhaltene Karte(n)" for the marketplac
 let milesLog = [];
 let redemptionIdeas = [];
 let plannedHotels = [];
+let yearArchive = []; // { year, closedAt, points, qp, meilenAtClose, goalsReached }
 
 const MILES_CATEGORIES = ['Flüge', 'Flughafen', 'Executive Meilen', 'CO2-Kompensation', 'Kreditkarte', 'Hotel', 'Mietwagen', 'Fahrdienst', 'Shopping', 'Parken', 'Zeitschriften-Abo', 'Reise-Buchungsportale', 'Uptrip', 'Fremdprogramm-Umwandlung', 'Kulanz/Sonstiges'];
 const AIRPORT_SUBTYPES = ['Aktionsmeilen', 'Shopping'];
@@ -91,6 +93,7 @@ const GOAL_LADDER = [
   {
     key: '700', shortLabel: '700 QP', name: '🎯 Extra Benefit: 1 eVoucher',
     year: () => currentProgramYear(), // läuft am laufenden Jahr, nicht an einem festen Zieljahr
+    qTarget: 700, // kein pTarget: reines QP-Ziel, kein Points-Bestandteil
     reached: (t) => t.q >= 700,
     valueText: (t) => t.q.toLocaleString('de-DE') + ' / 700 QP',
     pct: (t) => Math.min(100, (t.q / 700) * 100),
@@ -104,14 +107,34 @@ const GOAL_LADDER = [
   {
     key: '800', shortLabel: '800 QP', name: '🎯 Extra Benefit: Meilentausch-Option',
     year: () => currentProgramYear(),
+    qTarget: 800,
     reached: (t) => t.q >= 800,
     valueText: (t) => t.q.toLocaleString('de-DE') + ' / 800 QP',
     pct: (t) => Math.min(100, (t.q / 800) * 100),
     note: () => 'Ab hier: bis zu 20.000 Meilen → 125 Points + 125 QP tauschbar'
   },
   {
+    key: 'ft', shortLabel: 'Frequent Traveller', name: '🥈 Frequent Traveller Status',
+    year: () => String(SENATOR_YEAR), // gehört zum selben Zieljahr wie Senator — die niedrigere Stufe davor
+    pTarget: 650, qTarget: 325,
+    reached: (t) => t.p >= 650 && t.q >= 325,
+    valueText: (t) => t.p.toLocaleString('de-DE') + ' / 650 P · ' + t.q.toLocaleString('de-DE') + ' / 325 QP',
+    // Gleiches ~2:1-Verhältnis wie bei Senator (650 P vs. 325 QP) — bei fast
+    // ausschließlichem Lufthansa-Group-Sammeln (P und QP wachsen 1:1) ist
+    // daher auch hier meist Points die tatsächliche Engstelle, nicht QP.
+    pct: (t) => Math.min(100, Math.min((t.p / 650) * 100, (t.q / 325) * 100)),
+    note: (t) => {
+      const pRem = Math.max(0, 650 - t.p);
+      const qRem = Math.max(0, 325 - t.q);
+      if (pRem === 0 && qRem === 0) return '✅ Erreicht';
+      const bottleneck = pRem >= qRem ? 'Points' : 'Qualifying Points';
+      return `Engpass aktuell: ${bottleneck} (noch ${pRem.toLocaleString('de-DE')} P / ${qRem.toLocaleString('de-DE')} QP offen) — Einstiegsstufe vor Senator.`;
+    }
+  },
+  {
     key: 'senator', shortLabel: 'Senator', name: '🏆 Senator',
     year: () => String(SENATOR_YEAR), // fest an das Zieljahr gebunden, nicht ans laufende Jahr
+    pTarget: 2000, qTarget: 1000,
     reached: (t) => t.p >= 2000 && t.q >= 1000,
     valueText: (t) => t.p.toLocaleString('de-DE') + ' / 2.000 P · ' + t.q.toLocaleString('de-DE') + ' / 1.000 QP',
     // Bei fast ausschließlichem Lufthansa-Group-Sammeln wachsen P und QP aus
@@ -280,7 +303,11 @@ function senatorYearTotals() {
 // Trip/Hotelaufenthalt sonst über die gemeinsame Zielleiter ins laufende
 // Jahr durchschlagen.
 function goalAchievedTotals(key) {
-  if (key === 'senator') {
+  const g = GOAL_LADDER.find(x => x.key === key);
+  // Ziele mit eigenem Points-Ziel (pTarget) hängen fest am Zieljahr SENATOR_YEAR
+  // (senatorYearTotals) statt am laufenden Jahr — aktuell "Frequent Traveller"
+  // und "Senator". Reine QP-Ziele (700/800) laufen am laufenden Jahr.
+  if (g && g.pTarget) {
     const st = senatorYearTotals();
     return { p: st.points, q: st.qp, m: 0 };
   }
@@ -288,11 +315,12 @@ function goalAchievedTotals(key) {
 }
 
 function goalProjectedTotals(key) {
-  if (key === 'senator') {
-    // senatorYearTotals() zählt für 2027 ohnehin alle Flüge/Hotels unabhängig
-    // vom "geplant"-Flag — aus heutiger Sicht (2026) ist für ein zukünftiges
-    // Jahr per Definition noch alles "geplant", Achieved und Projected fallen
-    // hier zusammen.
+  const g = GOAL_LADDER.find(x => x.key === key);
+  if (g && g.pTarget) {
+    // senatorYearTotals() zählt für SENATOR_YEAR ohnehin alle Flüge/Hotels
+    // unabhängig vom "geplant"-Flag — aus heutiger Sicht ist für ein
+    // zukünftiges Jahr per Definition noch alles "geplant", Achieved und
+    // Projected fallen hier zusammen.
     const st = senatorYearTotals();
     return { p: st.points, q: st.qp, m: 0 };
   }
@@ -484,7 +512,8 @@ function render() {
     renderMarketplace,
     renderMiles,
     renderRedemptionIdeas,
-    renderPlannedHotels
+    renderPlannedHotels,
+    renderYearArchive
   ].forEach(fn => {
     try { fn(); } catch (e) { console.error('Render-Fehler in ' + fn.name + ':', e); }
   });
@@ -701,19 +730,19 @@ function renderFlightsNeeded() {
 
   el.innerHTML = remainingGoals.map(g => {
     const projected = goalProjectedTotals(g.key);
-    // Bei Senator sind Points (2.000-Ziel) und QP (1.000-Ziel) beide bindend —
-    // da Lufthansa-Group-Flüge P und QP 1:1 draufrechnen, ist meist Points
-    // (das doppelte Ziel) die tatsächliche Engstelle. Also den jeweils
-    // größeren Rückstand als Basis für die Segment-Berechnung nehmen.
+    // Bei Zielen mit eigenem Points-Anteil (pTarget, z.B. Frequent Traveller,
+    // Senator) sind Points UND QP beide bindend — da Lufthansa-Group-Flüge P
+    // und QP 1:1 draufrechnen, ist meist Points (das größere Ziel) die
+    // tatsächliche Engstelle. Also den jeweils größeren Rückstand als Basis
+    // für die Segment-Berechnung nehmen.
     let shortfall, shortfallLabel;
-    if (g.key === 'senator') {
-      const pRem = Math.max(0, 2000 - projected.p);
-      const qRem = Math.max(0, 1000 - projected.q);
+    if (g.pTarget) {
+      const pRem = Math.max(0, g.pTarget - projected.p);
+      const qRem = Math.max(0, g.qTarget - projected.q);
       shortfall = Math.max(pRem, qRem);
       shortfallLabel = `${shortfall.toLocaleString('de-DE')} ${pRem >= qRem ? 'Points' : 'QP'}`;
     } else {
-      const qpTarget = g.key === '700' ? 700 : 800;
-      shortfall = Math.max(0, qpTarget - projected.q);
+      shortfall = Math.max(0, g.qTarget - projected.q);
       shortfallLabel = `${shortfall.toLocaleString('de-DE')} QP`;
     }
     const rows = FLIGHT_PROFILES.map(prof => {
@@ -1400,6 +1429,59 @@ function renderPlannedHotels() {
   }).join('');
 }
 
+function renderYearArchive() {
+  const btn = document.getElementById('close-year-btn');
+  if (btn) btn.textContent = `🔒 Jahr ${currentProgramYear()} abschließen`;
+
+  const list = document.getElementById('year-archive-list');
+  if (!list) return;
+  if (yearArchive.length === 0) {
+    list.innerHTML = '<div class="empty">Noch keine Jahre archiviert.</div>';
+    return;
+  }
+  const sorted = [...yearArchive].sort((a, b) => b.year.localeCompare(a.year));
+  list.innerHTML = sorted.map(y => `<div class="trip">
+    <div class="top">
+      <div>
+        <div class="route">Jahr ${y.year}</div>
+        <div class="meta">Abgeschlossen am ${y.closedAt}</div>
+        <div class="meta">${y.goalsReached && y.goalsReached.length ? '🏆 erreicht: ' + y.goalsReached.join(', ') : 'keine Ziele dieses Jahres erreicht'}</div>
+        <div class="meta">Meilen-Stand beim Abschluss: ${y.meilenAtClose.toLocaleString('de-DE')}</div>
+      </div>
+      <div class="pts">
+        <div class="p">${y.points.toLocaleString('de-DE')} P</div>
+        <div class="q">${y.qp.toLocaleString('de-DE')} QP</div>
+      </div>
+    </div>
+  </div>`).join('');
+}
+
+async function saveYearArchive() { await DB.set(KEY_YEAR_ARCHIVE, yearArchive); }
+
+window.closeCurrentYear = async function() {
+  const year = currentProgramYear();
+  const totals = computeAchievedTotals(); // bereits auf `year` begrenzt
+  const relevantGoals = GOAL_LADDER.filter(g => g.year() === year);
+  const goalsReached = relevantGoals.filter(g => g.reached(totals)).map(g => g.shortLabel);
+  const alreadyArchived = yearArchive.some(y => y.year === year);
+
+  const msg = `${year} abschließen?\n\nEndstand: ${totals.p.toLocaleString('de-DE')} Points, ${totals.q.toLocaleString('de-DE')} QP\nErreichte Ziele: ${goalsReached.join(', ') || '– keine –'}\n\nDanach werden die Basiswerte für Points/QP auf 0 zurückgesetzt, damit ${Number(year) + 1} sauber bei 0 startet. Der Meilen-Basiswert und der Trip-Log bleiben unverändert erhalten — ${year} lässt sich jederzeit im Archiv nachschlagen.${alreadyArchived ? `\n\n${year} ist bereits archiviert — der bestehende Eintrag wird überschrieben.` : ''}`;
+  if (!confirm(msg)) return;
+
+  const entry = { year, closedAt: new Date().toISOString().slice(0, 10), points: totals.p, qp: totals.q, meilenAtClose: totals.m, goalsReached };
+  const idx = yearArchive.findIndex(y => y.year === year);
+  if (idx >= 0) yearArchive[idx] = entry; else yearArchive.push(entry);
+  await saveYearArchive();
+
+  baseline = { ...baseline, p: 0, q: 0, note: '' };
+  await saveBaseline();
+  document.getElementById('base-p').value = 0;
+  document.getElementById('base-q').value = 0;
+  document.getElementById('base-note').value = '';
+
+  render();
+};
+
 // ---------- persistence ----------
 
 async function saveBaseline() { await DB.set(KEY_BASE, baseline); }
@@ -1430,6 +1512,7 @@ async function loadAll() {
   milesLog = await DB.get(KEY_MILES_LOG, []);
   redemptionIdeas = await DB.get(KEY_REDEMPTION_IDEAS, []);
   plannedHotels = await DB.get(KEY_PLANNED_HOTELS, []);
+  yearArchive = await DB.get(KEY_YEAR_ARCHIVE, []);
 
   let inventoryMigrated = false;
   inventory.forEach(i => { if (!i.id) { i.id = genId(); inventoryMigrated = true; } });
