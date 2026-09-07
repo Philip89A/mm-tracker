@@ -60,15 +60,15 @@ const PROMO_TEMPLATES = [
   }
 ];
 
-// Vier Standard-Flugprofile (kontinental) für die "noch benötigte Flüge"-
-// Prognose: Economy/Business, jeweils ohne und mit CO2-Kompensation (80% =
-// der App-Standard, siehe t-co2-Feld im Trip-Formular).
-const FLIGHT_PROFILES = [
-  { label: 'Economy ohne CO₂-Komp.', range: 'continental', cls: 'economy', co2: 0 },
-  { label: 'Economy mit CO₂-Komp. (80%)', range: 'continental', cls: 'economy', co2: 80 },
-  { label: 'Business ohne CO₂-Komp.', range: 'continental', cls: 'business', co2: 0 },
-  { label: 'Business mit CO₂-Komp. (80%)', range: 'continental', cls: 'business', co2: 80 }
-];
+// "Was-wäre-wenn"-Zustand für die Prognose-Rechner-Karte (renderFlightsNeeded)
+// — bewusst nur In-Memory, nicht persistiert: eine Simulation ist keine
+// tatsächliche Buchung. Wird ein Hebel wirklich genutzt, gehört er als
+// normale Meilen-Bewegung ins Meilen-Tab, nicht hierher.
+let calcRange = 'continental';
+let calcClass = 'economy';
+let calcCo2 = 80;
+let calcLever800 = false;
+let calcCcMiles = 0;
 
 const SENATOR_YEAR = 2027;
 const SENATOR_QUARTERS = [
@@ -718,9 +718,16 @@ function renderYearChart() {
 function renderFlightsNeeded() {
   const el = document.getElementById('flights-needed-list');
   if (!el) return;
-  // Pro Ziel eigene Basis: 700/800 QP hängen am laufenden Jahr, Senator ist
-  // fest an SENATOR_YEAR gebunden (siehe goalProjectedTotals) — ein für 2027
-  // geplanter Trip/Hotelaufenthalt darf die 700/800-Prognose nicht verändern.
+
+  const ccPQ = Math.floor(calcCcMiles / 250);
+  const ccHintEl = document.getElementById('calc-cc-miles-hint');
+  if (ccHintEl) ccHintEl.textContent = calcCcMiles > 0 ? `→ +${ccPQ} Points / +${ccPQ} QP` : 'kein Umtausch simuliert';
+
+  // Pro Ziel eigene Basis: 700/800 QP hängen am laufenden Jahr, Senator/FT
+  // sind fest an SENATOR_YEAR gebunden (siehe goalProjectedTotals) — ein für
+  // 2027 geplanter Trip/Hotelaufenthalt darf die 700/800-Prognose nicht
+  // verändern. Die beiden Hebel unten (Kreditkarten-Tausch, 800-QP-Swap)
+  // werden hier rein rechnerisch angewendet, ohne echte Daten zu verändern.
   const remainingGoals = GOAL_LADDER.filter(g => !g.reached(goalProjectedTotals(g.key)));
 
   if (remainingGoals.length === 0) {
@@ -728,8 +735,20 @@ function renderFlightsNeeded() {
     return;
   }
 
+  const perSegment = segmentPointsWithCo2(calcRange, calcClass, calcCo2);
+  const profileLabel = `${calcRange === 'continental' ? 'Kontinental' : 'Interkontinental'} ${labelClass(calcClass)}${calcCo2 > 0 ? ' · CO₂ +' + calcCo2 + '%' : ''}`;
+
   el.innerHTML = remainingGoals.map(g => {
     const projected = goalProjectedTotals(g.key);
+
+    // Hebel-Reihenfolge: erst der lineare Kreditkarten-Tausch, danach die
+    // Freischaltungsprüfung für den 800-QP-Meilentausch (der braucht ja
+    // selbst schon 800 QP, die der Kreditkarten-Tausch mit herstellen kann).
+    let p = projected.p + ccPQ;
+    let q = projected.q + ccPQ;
+    const lever800Eligible = q >= 800;
+    if (calcLever800 && lever800Eligible) { p += 125; q += 125; }
+
     // Bei Zielen mit eigenem Points-Anteil (pTarget, z.B. Frequent Traveller,
     // Senator) sind Points UND QP beide bindend — da Lufthansa-Group-Flüge P
     // und QP 1:1 draufrechnen, ist meist Points (das größere Ziel) die
@@ -737,24 +756,26 @@ function renderFlightsNeeded() {
     // für die Segment-Berechnung nehmen.
     let shortfall, shortfallLabel;
     if (g.pTarget) {
-      const pRem = Math.max(0, g.pTarget - projected.p);
-      const qRem = Math.max(0, g.qTarget - projected.q);
+      const pRem = Math.max(0, g.pTarget - p);
+      const qRem = Math.max(0, g.qTarget - q);
       shortfall = Math.max(pRem, qRem);
       shortfallLabel = `${shortfall.toLocaleString('de-DE')} ${pRem >= qRem ? 'Points' : 'QP'}`;
     } else {
-      shortfall = Math.max(0, g.qTarget - projected.q);
+      shortfall = Math.max(0, g.qTarget - q);
       shortfallLabel = `${shortfall.toLocaleString('de-DE')} QP`;
     }
-    const rows = FLIGHT_PROFILES.map(prof => {
-      const perSegment = segmentPointsWithCo2(prof.range, prof.cls, prof.co2);
-      const segments = Math.ceil(shortfall / perSegment);
-      return `<div class="flex-between" style="margin-top:3px; font-size:12.5px;">
-        <span>${prof.label}</span><span style="font-weight:700;">${segments} Segm.</span>
-      </div>`;
-    }).join('');
+    const segments = shortfall > 0 ? Math.ceil(shortfall / perSegment) : 0;
+
+    const leverNotes = [];
+    if (ccPQ > 0) leverNotes.push(`+${ccPQ} P/QP Kreditkarten-Tausch`);
+    if (calcLever800) leverNotes.push(lever800Eligible ? '+125 P/QP 800-QP-Meilentausch' : '800-QP-Meilentausch: noch nicht freigeschaltet (<800 QP)');
+
     return `<div class="miles-cat-row">
       <div style="font-weight:600; color:var(--navy);">${g.shortLabel} <span style="font-weight:400; color:var(--muted);">(Jahr ${g.year()})</span> — noch ${shortfallLabel}</div>
-      ${rows}
+      ${leverNotes.length ? `<div style="font-size:11px; color:var(--muted); margin-top:2px;">${leverNotes.join(' · ')}</div>` : ''}
+      <div class="flex-between" style="margin-top:4px; font-size:12.5px;">
+        <span>${profileLabel}</span><span style="font-weight:700;">${shortfall > 0 ? segments + ' Segm.' : '✅ erreicht'}</span>
+      </div>
     </div>`;
   }).join('');
 }
@@ -1999,6 +2020,12 @@ document.getElementById('mi-category').addEventListener('change', () => {
 document.getElementById('mi-filter-category').addEventListener('change', renderMiles);
 document.getElementById('mi-filter-year').addEventListener('change', renderMiles);
 document.getElementById('trip-filter-year').addEventListener('change', renderTrips);
+
+document.getElementById('calc-range').addEventListener('change', (e) => { calcRange = e.target.value; renderFlightsNeeded(); });
+document.getElementById('calc-class').addEventListener('change', (e) => { calcClass = e.target.value; renderFlightsNeeded(); });
+document.getElementById('calc-co2').addEventListener('change', (e) => { calcCo2 = parseInt(e.target.value) || 0; renderFlightsNeeded(); });
+document.getElementById('calc-lever-800').addEventListener('change', (e) => { calcLever800 = e.target.checked; renderFlightsNeeded(); });
+document.getElementById('calc-cc-miles').addEventListener('input', (e) => { calcCcMiles = parseInt(e.target.value) || 0; renderFlightsNeeded(); });
 
 let editingMilesId = null;
 

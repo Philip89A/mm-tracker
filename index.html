@@ -83,8 +83,39 @@
 
     <div class="card">
       <h2>🔮 Prognose: Noch benötigte Flüge</h2>
-      <p class="hint" style="margin-top:0;">Ausgehend vom Stand inkl. bereits geplanter Flüge &amp; Hotelaufenthalte (heller Balken oben) — wie viele zusätzliche Segmente (kontinental) bis zum jeweils nächsten Ziel noch fehlen, je nach Klasse und CO₂-Kompensation.</p>
-      <div id="flights-needed-list"></div>
+      <p class="hint" style="margin-top:0;">Ausgehend vom Stand inkl. bereits geplanter Flüge &amp; Hotelaufenthalte (heller Balken oben) — wie viele zusätzliche Segmente bis zum jeweils nächsten Ziel noch fehlen. Die beiden Hebel unten sind reine Was-wäre-wenn-Eingaben (nicht gespeichert) — tatsächlich genutzte Umtausche bitte wie gewohnt als Meilen-Bewegung eintragen.</p>
+      <div class="row2">
+        <div>
+          <label style="margin-top:0;">Reichweite</label>
+          <select id="calc-range">
+            <option value="continental">Kontinental (Europa)</option>
+            <option value="intercontinental">Interkontinental</option>
+          </select>
+        </div>
+        <div>
+          <label style="margin-top:0;">Klasse</label>
+          <select id="calc-class">
+            <option value="economy">Economy</option>
+            <option value="premium">Premium Economy</option>
+            <option value="business">Business</option>
+            <option value="first">First</option>
+          </select>
+        </div>
+      </div>
+      <label>CO₂-Kompensation?</label>
+      <select id="calc-co2">
+        <option value="0">Nein</option>
+        <option value="30">Ja, ~30% Bonus</option>
+        <option value="80" selected>Ja, ~80% Bonus (Maximalpaket, Standard)</option>
+      </select>
+      <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:600; color:var(--text);">
+        <input type="checkbox" id="calc-lever-800" style="width:auto;">
+        800-QP-Meilentausch nutzen (sobald 800 QP erreicht: bis zu 20.000 Meilen → +125 P / +125 QP)
+      </label>
+      <label>Kreditkarten-Meilen-Tausch (0–25.000, 250 Meilen = 1 Point + 1 QP)</label>
+      <input type="range" id="calc-cc-miles" min="0" max="25000" step="250" value="0">
+      <p class="hint" id="calc-cc-miles-hint" style="margin-top:2px;"></p>
+      <div id="flights-needed-list" style="margin-top:10px;"></div>
     </div>
 
     <div class="card">
