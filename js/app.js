@@ -12,6 +12,7 @@ const KEY_MILES_LOG = 'miles-log';
 const KEY_REDEMPTION_IDEAS = 'redemption-ideas';
 const KEY_PLANNED_HOTELS = 'planned-hotels';
 const KEY_YEAR_ARCHIVE = 'year-archive';
+const KEY_CC_MILES_BALANCE = 'cc-miles-balance';
 
 let baseline = { p: 0, q: 0, m: 0 };
 let trips = [];
@@ -28,6 +29,7 @@ let milesLog = [];
 let redemptionIdeas = [];
 let plannedHotels = [];
 let yearArchive = []; // { year, closedAt, points, qp, meilenAtClose, goalsReached }
+let ccMilesBalance = 0; // manuell gepflegter Kreditkarten-Meilen-Stand
 
 const MILES_CATEGORIES = ['Flüge', 'Flughafen', 'Executive Meilen', 'CO2-Kompensation', 'Kreditkarte', 'Hotel', 'Mietwagen', 'Fahrdienst', 'Shopping', 'Parken', 'Zeitschriften-Abo', 'Reise-Buchungsportale', 'Uptrip', 'Fremdprogramm-Umwandlung', 'Kulanz/Sonstiges'];
 const AIRPORT_SUBTYPES = ['Aktionsmeilen', 'Shopping'];
@@ -70,6 +72,14 @@ let calcCo2 = 80;
 let calcLever800 = false;
 let calcCcMiles = 0;
 
+// Der Kreditkarten-Meilentausch geht nur in 5.000er-Schritten, gedeckelt auf
+// 25.000 Meilen/Jahr — und natürlich nie mehr, als tatsächlich auf dem
+// Kartenkonto vorhanden ist.
+function maxRedeemableCcMiles(balance) {
+  const capped = Math.min(balance || 0, 25000);
+  return Math.floor(capped / 5000) * 5000;
+}
+
 const SENATOR_YEAR = 2027;
 const SENATOR_QUARTERS = [
   { label: 'Q1 (Jan–Mär)', points: 500, qp: 250 },
@@ -86,10 +96,30 @@ const EVOUCHER_QUARTERS = [
   { label: 'Q4 (Okt–Dez)', qp: 700 }
 ];
 
-// Leiter der Jahresziele: 700 QP -> 800 QP -> Senator. Der Fokus springt
-// automatisch zum nächsten noch nicht erreichten Ziel, kann aber manuell
-// überschrieben werden (nur UI-Zustand, nicht persistiert).
+// Leiter der Jahresziele: Frequent Traveller -> 700 QP -> 800 QP -> Senator
+// (in dieser Reihenfolge, da FT mit 325 QP niedriger liegt als die beiden
+// Extra-Benefit-Schwellen). Der Fokus springt automatisch zum nächsten noch
+// nicht erreichten Ziel, kann aber manuell überschrieben werden (nur
+// UI-Zustand, nicht persistiert).
 const GOAL_LADDER = [
+  {
+    key: 'ft', shortLabel: 'Frequent Traveller', name: '🥈 Frequent Traveller Status',
+    year: () => String(SENATOR_YEAR), // gehört zum selben Zieljahr wie Senator — die niedrigere Stufe davor
+    pTarget: 650, qTarget: 325,
+    reached: (t) => t.p >= 650 && t.q >= 325,
+    valueText: (t) => t.p.toLocaleString('de-DE') + ' / 650 P · ' + t.q.toLocaleString('de-DE') + ' / 325 QP',
+    // Gleiches ~2:1-Verhältnis wie bei Senator (650 P vs. 325 QP) — bei fast
+    // ausschließlichem Lufthansa-Group-Sammeln (P und QP wachsen 1:1) ist
+    // daher auch hier meist Points die tatsächliche Engstelle, nicht QP.
+    pct: (t) => Math.min(100, Math.min((t.p / 650) * 100, (t.q / 325) * 100)),
+    note: (t) => {
+      const pRem = Math.max(0, 650 - t.p);
+      const qRem = Math.max(0, 325 - t.q);
+      if (pRem === 0 && qRem === 0) return '✅ Erreicht';
+      const bottleneck = pRem >= qRem ? 'Points' : 'Qualifying Points';
+      return `Engpass aktuell: ${bottleneck} (noch ${pRem.toLocaleString('de-DE')} P / ${qRem.toLocaleString('de-DE')} QP offen) — Einstiegsstufe vor Senator.`;
+    }
+  },
   {
     key: '700', shortLabel: '700 QP', name: '🎯 Extra Benefit: 1 eVoucher',
     year: () => currentProgramYear(), // läuft am laufenden Jahr, nicht an einem festen Zieljahr
@@ -112,24 +142,6 @@ const GOAL_LADDER = [
     valueText: (t) => t.q.toLocaleString('de-DE') + ' / 800 QP',
     pct: (t) => Math.min(100, (t.q / 800) * 100),
     note: () => 'Ab hier: bis zu 20.000 Meilen → 125 Points + 125 QP tauschbar'
-  },
-  {
-    key: 'ft', shortLabel: 'Frequent Traveller', name: '🥈 Frequent Traveller Status',
-    year: () => String(SENATOR_YEAR), // gehört zum selben Zieljahr wie Senator — die niedrigere Stufe davor
-    pTarget: 650, qTarget: 325,
-    reached: (t) => t.p >= 650 && t.q >= 325,
-    valueText: (t) => t.p.toLocaleString('de-DE') + ' / 650 P · ' + t.q.toLocaleString('de-DE') + ' / 325 QP',
-    // Gleiches ~2:1-Verhältnis wie bei Senator (650 P vs. 325 QP) — bei fast
-    // ausschließlichem Lufthansa-Group-Sammeln (P und QP wachsen 1:1) ist
-    // daher auch hier meist Points die tatsächliche Engstelle, nicht QP.
-    pct: (t) => Math.min(100, Math.min((t.p / 650) * 100, (t.q / 325) * 100)),
-    note: (t) => {
-      const pRem = Math.max(0, 650 - t.p);
-      const qRem = Math.max(0, 325 - t.q);
-      if (pRem === 0 && qRem === 0) return '✅ Erreicht';
-      const bottleneck = pRem >= qRem ? 'Points' : 'Qualifying Points';
-      return `Engpass aktuell: ${bottleneck} (noch ${pRem.toLocaleString('de-DE')} P / ${qRem.toLocaleString('de-DE')} QP offen) — Einstiegsstufe vor Senator.`;
-    }
   },
   {
     key: 'senator', shortLabel: 'Senator', name: '🏆 Senator',
@@ -718,6 +730,23 @@ function renderYearChart() {
 function renderFlightsNeeded() {
   const el = document.getElementById('flights-needed-list');
   if (!el) return;
+
+  // Slider-Obergrenze am tatsächlich verfügbaren Kreditkarten-Meilen-Stand
+  // ausrichten (min. mit dem 25.000er-Jahresdeckel) — mehr als vorhanden
+  // oder erlaubt lässt sich gar nicht erst einstellen.
+  const maxCc = maxRedeemableCcMiles(ccMilesBalance);
+  const sliderEl = document.getElementById('calc-cc-miles');
+  if (sliderEl) {
+    sliderEl.max = maxCc;
+    if (calcCcMiles > maxCc) { calcCcMiles = maxCc; sliderEl.value = maxCc; }
+  }
+  const balanceHintEl = document.getElementById('cc-miles-balance-hint');
+  if (balanceHintEl) {
+    const maxPQ = maxCc / 250;
+    balanceHintEl.textContent = ccMilesBalance > 0
+      ? `Stand: ${ccMilesBalance.toLocaleString('de-DE')} Meilen — max. tauschbar: ${maxCc.toLocaleString('de-DE')} Meilen (5.000er-Schritte, 25.000/Jahr gedeckelt) → max. +${maxPQ} Points / +${maxPQ} QP`
+      : 'Noch kein Stand hinterlegt.';
+  }
 
   const ccPQ = Math.floor(calcCcMiles / 250);
   const ccHintEl = document.getElementById('calc-cc-miles-hint');
@@ -1479,6 +1508,20 @@ function renderYearArchive() {
 
 async function saveYearArchive() { await DB.set(KEY_YEAR_ARCHIVE, yearArchive); }
 
+window.saveCcMilesBalance = async function() {
+  ccMilesBalance = parseInt(document.getElementById('cc-miles-balance').value) || 0;
+  await DB.set(KEY_CC_MILES_BALANCE, ccMilesBalance);
+  // Simulierten Tausch auf den neuen, tatsächlich verfügbaren Höchstwert
+  // setzen — beantwortet direkt "wie viele Points/QP wären das max.?".
+  calcCcMiles = maxRedeemableCcMiles(ccMilesBalance);
+  const sliderEl = document.getElementById('calc-cc-miles');
+  // Erst max anheben, DANN value setzen — sonst klemmt der Browser value
+  // beim Zuweisen sofort auf dem noch alten (kleineren) max fest.
+  sliderEl.max = calcCcMiles;
+  sliderEl.value = calcCcMiles;
+  renderFlightsNeeded();
+};
+
 window.closeCurrentYear = async function() {
   const year = currentProgramYear();
   const totals = computeAchievedTotals(); // bereits auf `year` begrenzt
@@ -1534,6 +1577,7 @@ async function loadAll() {
   redemptionIdeas = await DB.get(KEY_REDEMPTION_IDEAS, []);
   plannedHotels = await DB.get(KEY_PLANNED_HOTELS, []);
   yearArchive = await DB.get(KEY_YEAR_ARCHIVE, []);
+  ccMilesBalance = await DB.get(KEY_CC_MILES_BALANCE, 0);
 
   let inventoryMigrated = false;
   inventory.forEach(i => { if (!i.id) { i.id = genId(); inventoryMigrated = true; } });
@@ -1575,6 +1619,7 @@ async function loadAll() {
   document.getElementById('base-note').value = baseline.note || '';
   document.getElementById('senator-ground-points').value = senatorGround.points || 0;
   document.getElementById('senator-ground-qp').value = senatorGround.qp || 0;
+  document.getElementById('cc-miles-balance').value = ccMilesBalance || '';
   document.getElementById('loading-tag').style.display = 'none';
 
   render();
