@@ -254,6 +254,14 @@ function computeAchievedTotals() {
     q += (u.rewardQP || 0) * timesThisYear;
     m += (u.rewardMeilen || 0) * (u.redemptionCount || 0); // Meilen bleiben jahresübergreifend zählbar
   });
+  // Als "erledigt" markierte Hotelaufenthalte (h.planned === false) zählen
+  // jetzt als erzielt statt als geplant — siehe markPlannedHotelDone().
+  plannedHotels.forEach(h => {
+    if (h.planned === false && h.dateFrom && h.dateFrom.startsWith(year)) {
+      p += h.points || 0;
+      q += h.qp || 0;
+    }
+  });
   // Meilen, die automatisch aus einem noch "geplanten" Trip stammen (Feld
   // "Erhaltene Meilen" im Trip-Formular), zählen konsequenterweise ebenfalls
   // erst als geplant, nicht als bereits erzielt — siehe computePlannedDelta().
@@ -285,6 +293,7 @@ function computePlannedDelta() {
     if (mv.sourceTripId && plannedTripIds.has(mv.sourceTripId)) m += mv.amount || 0;
   });
   plannedHotels.forEach(h => {
+    if (h.planned === false) return; // bereits als erledigt markiert -> zählt jetzt bei computeAchievedTotals()
     if (h.dateFrom && h.dateFrom.startsWith(year) && ((h.points || 0) > 0 || (h.qp || 0) > 0)) {
       p += h.points || 0;
       q += h.qp || 0;
@@ -1289,18 +1298,18 @@ window.exportTripsCsv = function() {
   downloadBlob(csv, 'text/csv;charset=utf-8;', `trip-log-${new Date().toISOString().slice(0, 10)}.csv`);
 };
 
-function renderMilesTrend() {
+function renderMilesTrend(list) {
   const el = document.getElementById('miles-trend-chart');
   const titleEl = document.getElementById('miles-trend-title');
   const byMonth = {};
-  milesLog.forEach(mv => {
+  list.forEach(mv => {
     if (!mv.date) return;
     const key = mv.date.slice(0, 7); // "YYYY-MM"
     byMonth[key] = (byMonth[key] || 0) + mv.amount;
   });
   const months = Object.keys(byMonth).sort();
   if (months.length === 0) {
-    el.innerHTML = '';
+    el.innerHTML = list.length ? '' : '<div class="empty">Keine Bewegungen für diesen Filter.</div>';
     titleEl.style.display = 'none';
     return;
   }
@@ -1323,14 +1332,41 @@ function renderMilesTrend() {
 function renderMiles() {
   document.getElementById('miles-count').textContent = milesLog.length;
 
-  // --- Aufschlüsselung nach Kategorie (immer über den gesamten Bestand, ungefiltert) ---
+  // --- Filter-Dropdowns befüllen (Auswahl dabei erhalten) — VOR der
+  // Aufschlüsselung, da Aufschlüsselung + Trend jetzt denselben Filter
+  // respektieren wie die Liste unten (nicht mehr immer der Gesamtbestand). ---
+  const catSelect = document.getElementById('mi-filter-category');
+  const prevCat = catSelect.value;
+  const usedCategories = MILES_CATEGORIES.filter(cat => milesLog.some(mv => mv.category === cat));
+  catSelect.innerHTML = '<option value="">Alle</option>' + usedCategories.map(c => `<option value="${c}">${c}</option>`).join('');
+  if (usedCategories.includes(prevCat)) catSelect.value = prevCat;
+
+  const yearSelect = document.getElementById('mi-filter-year');
+  const prevYear = yearSelect.value;
+  const usedYears = [...new Set(milesLog.map(mv => (mv.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
+  yearSelect.innerHTML = '<option value="">Alle</option>' + usedYears.map(y => `<option value="${y}">${y}</option>`).join('');
+  if (usedYears.includes(prevYear)) yearSelect.value = prevYear;
+
+  const filterCat = catSelect.value;
+  const filterYear = yearSelect.value;
+  const filtered = milesLog
+    .map((mv, idx) => ({ ...mv, idx }))
+    .filter(mv => !filterCat || mv.category === filterCat)
+    .filter(mv => !filterYear || (mv.date || '').startsWith(filterYear));
+
+  // --- Aufschlüsselung nach Kategorie — respektiert jetzt den Filter. Bei
+  // aktivem Kategorie-Filter bleibt nur eine Kategorie übrig; statt der
+  // (dann bedeutungslosen) 100%-Vergleichsbalken zeigt sich automatisch eine
+  // Detailansicht mit Quellen-Vergleichsbalken innerhalb dieser Kategorie. ---
   const breakdownEl = document.getElementById('miles-breakdown');
-  if (milesLog.length === 0) {
-    breakdownEl.innerHTML = '<div class="empty">Noch keine Meilen-Bewegungen erfasst.</div>';
+  if (filtered.length === 0) {
+    breakdownEl.innerHTML = milesLog.length === 0
+      ? '<div class="empty">Noch keine Meilen-Bewegungen erfasst.</div>'
+      : '<div class="empty">Keine Bewegungen für diesen Filter.</div>';
   } else {
     let totalGained = 0, totalRedeemed = 0;
     const byCategory = {};
-    milesLog.forEach(mv => {
+    filtered.forEach(mv => {
       const c = (byCategory[mv.category] = byCategory[mv.category] || { total: 0, gained: 0, redeemed: 0, count: 0, sources: {} });
       c.total += mv.amount;
       c.count += 1;
@@ -1350,9 +1386,10 @@ function renderMiles() {
       .filter(cat => byCategory[cat])
       .sort((a, b) => byCategory[b].total - byCategory[a].total);
     const topCat = sortedCats.length && byCategory[sortedCats[0]].total > 0 ? sortedCats[0] : null;
+    const maxCatTotal = Math.max(1, ...sortedCats.map(c => Math.abs(byCategory[c].total)));
 
     const totalsHtml = `<div class="miles-totals-box">
-      <div class="flex-between"><span>Gesamt Zugang</span><span style="color:var(--green); font-weight:700;">+${totalGained.toLocaleString('de-DE')}</span></div>
+      <div class="flex-between"><span>Gesamt Zugang${filterCat ? ' (' + filterCat + ')' : ''}</span><span style="color:var(--green); font-weight:700;">+${totalGained.toLocaleString('de-DE')}</span></div>
       <div class="flex-between" style="margin-top:4px;"><span>Gesamt Abgang/Einlösung</span><span style="color:var(--red); font-weight:700;">−${totalRedeemed.toLocaleString('de-DE')}</span></div>
       <div class="flex-between" style="margin-top:4px; padding-top:6px; border-top:1px solid var(--gray-border);"><span style="font-weight:700;">Netto</span><span style="font-weight:700;">${(totalGained - totalRedeemed).toLocaleString('de-DE')}</span></div>
     </div>`;
@@ -1360,21 +1397,28 @@ function renderMiles() {
     const catRows = sortedCats.map(cat => {
       const data = byCategory[cat];
       const pct = totalGained > 0 ? Math.round((data.gained / totalGained) * 100) : 0;
+      const catBarPct = Math.min(100, Math.round((Math.abs(data.total) / maxCatTotal) * 100));
+      const maxSourceTotal = Math.max(1, ...Object.values(data.sources).map(v => Math.abs(v)));
       const sortedSources = Object.keys(data.sources).sort((a, b) => data.sources[b] - data.sources[a]);
-      const sourceRows = sortedSources.map(src =>
-        `<div class="flex-between" style="padding-left:14px; margin-top:3px; font-size:11.5px; color:var(--muted);">
-          <span>↳ ${src}</span><span>${data.sources[src].toLocaleString('de-DE')}</span>
-        </div>`
-      ).join('');
+      const sourceRows = sortedSources.map(src => {
+        const srcBarPct = Math.min(100, Math.round((Math.abs(data.sources[src]) / maxSourceTotal) * 100));
+        return `<div style="padding-left:14px; margin-top:5px;">
+          <div class="flex-between" style="font-size:11.5px; color:var(--muted);">
+            <span>↳ ${src}</span><span>${data.sources[src].toLocaleString('de-DE')}</span>
+          </div>
+          <div class="bar-bg" style="height:5px; margin-top:2px;"><div class="bar-fill q" style="width:${srcBarPct}%"></div></div>
+        </div>`;
+      }).join('');
       const metaParts = [`${data.count} ${data.count === 1 ? 'Eintrag' : 'Einträge'}`];
-      if (data.gained > 0) metaParts.push(`${pct}% der gesammelten Meilen`);
+      if (!filterCat && data.gained > 0) metaParts.push(`${pct}% der gesammelten Meilen`);
       if (data.redeemed > 0) metaParts.push(`davon ${data.redeemed.toLocaleString('de-DE')} eingelöst`);
       return `<div class="miles-cat-row">
         <div class="flex-between">
-          <span style="font-weight:600; color:var(--navy);">${cat}${cat === topCat ? ' 🏆' : ''}</span>
+          <span style="font-weight:600; color:var(--navy);">${cat}${cat === topCat && !filterCat ? ' 🏆' : ''}</span>
           <span style="font-weight:700;">${data.total.toLocaleString('de-DE')} Meilen</span>
         </div>
-        <div class="miles-cat-meta">${metaParts.join(' · ')}</div>
+        ${!filterCat ? `<div class="bar-bg" style="height:6px; margin-top:5px;"><div class="bar-fill q" style="width:${catBarPct}%"></div></div>` : ''}
+        <div class="miles-cat-meta" style="margin-top:4px;">${metaParts.join(' · ')}</div>
         ${sourceRows}
       </div>`;
     }).join('');
@@ -1382,29 +1426,9 @@ function renderMiles() {
     breakdownEl.innerHTML = totalsHtml + catRows;
   }
 
-  renderMilesTrend();
-
-  // --- Filter-Dropdowns befüllen (Auswahl dabei erhalten) ---
-  const catSelect = document.getElementById('mi-filter-category');
-  const prevCat = catSelect.value;
-  const usedCategories = MILES_CATEGORIES.filter(cat => milesLog.some(mv => mv.category === cat));
-  catSelect.innerHTML = '<option value="">Alle</option>' + usedCategories.map(c => `<option value="${c}">${c}</option>`).join('');
-  if (usedCategories.includes(prevCat)) catSelect.value = prevCat;
-
-  const yearSelect = document.getElementById('mi-filter-year');
-  const prevYear = yearSelect.value;
-  const usedYears = [...new Set(milesLog.map(mv => (mv.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
-  yearSelect.innerHTML = '<option value="">Alle</option>' + usedYears.map(y => `<option value="${y}">${y}</option>`).join('');
-  if (usedYears.includes(prevYear)) yearSelect.value = prevYear;
+  renderMilesTrend(filtered);
 
   // --- Chronologische, gefilterte Liste ---
-  const filterCat = catSelect.value;
-  const filterYear = yearSelect.value;
-  const filtered = milesLog
-    .map((mv, idx) => ({ ...mv, idx }))
-    .filter(mv => !filterCat || mv.category === filterCat)
-    .filter(mv => !filterYear || (mv.date || '').startsWith(filterYear));
-
   const listEl = document.getElementById('miles-list');
   if (milesLog.length === 0) {
     listEl.innerHTML = '<div class="empty">Noch keine Meilen-Bewegungen erfasst.</div>';
@@ -1462,22 +1486,46 @@ function renderPlannedHotels() {
   const sorted = plannedHotels.map((h, idx) => ({ ...h, idx })).sort((a, b) => new Date(a.dateFrom) - new Date(b.dateFrom));
   list.innerHTML = sorted.map(h => {
     const hasPoints = (h.points || 0) > 0 || (h.qp || 0) > 0;
+    const isDone = h.planned === false;
     return `<div class="trip">
     <div class="top">
       <div>
         <div class="route">${h.title}</div>
         <div class="meta">${h.dateFrom}${h.dateTo ? ' – ' + h.dateTo : ''}</div>
+        <div class="meta"><span class="tag ${isDone ? 'ok' : 'mid'}">${isDone ? '✅ Erledigt — zählt als erzielt' : '📅 Geplant'}</span></div>
         ${h.note ? `<div class="meta">📝 ${h.note}</div>` : ''}
       </div>
-      ${hasPoints ? `<div class="pts"><div class="p" style="opacity:0.6;">📅 +${h.points || 0} P · +${h.qp || 0} QP</div></div>` : ''}
+      ${hasPoints ? `<div class="pts"><div class="p" style="${isDone ? '' : 'opacity:0.6;'}">${isDone ? '' : '📅 '}+${h.points || 0} P · +${h.qp || 0} QP</div></div>` : ''}
     </div>
     <div class="flex-between" style="margin-top:6px;">
       <button class="del" onclick="deletePlannedHotel(${h.idx})">entfernen</button>
-      <button type="button" class="btn small secondary" onclick="startEditPlannedHotel(${h.idx})">✏️ Bearbeiten</button>
+      <div>
+        <button type="button" class="btn small secondary" onclick="startEditPlannedHotel(${h.idx})">✏️ Bearbeiten</button>
+        ${isDone
+          ? `<button type="button" class="btn small secondary" onclick="markPlannedHotelUndone(${h.idx})">↩️ Rückgängig</button>`
+          : `<button type="button" class="btn small" style="background:var(--green); color:white;" onclick="markPlannedHotelDone(${h.idx})">✅ War tatsächlich so</button>`}
+      </div>
     </div>
   </div>`;
   }).join('');
 }
+
+window.markPlannedHotelDone = async function(idx) {
+  const h = plannedHotels[idx];
+  if (!h) return;
+  if (!confirm(`"${h.title}" als tatsächlich erfolgt markieren? Die hinterlegten ${h.points || 0} Points / ${h.qp || 0} QP zählen danach als erzielt statt als geplant.`)) return;
+  h.planned = false;
+  await savePlannedHotels();
+  render();
+};
+
+window.markPlannedHotelUndone = async function(idx) {
+  const h = plannedHotels[idx];
+  if (!h) return;
+  h.planned = true;
+  await savePlannedHotels();
+  render();
+};
 
 function renderYearArchive() {
   const btn = document.getElementById('close-year-btn');
@@ -2181,6 +2229,7 @@ window.cancelEditPlannedHotel = function() {
 document.getElementById('planned-hotel-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const isEdit = !!editingPlannedHotelId;
+  const existing = isEdit ? plannedHotels.find(h => h.id === editingPlannedHotelId) : null;
   const hotel = {
     id: isEdit ? editingPlannedHotelId : genId(),
     title: document.getElementById('ph-title').value,
@@ -2188,7 +2237,10 @@ document.getElementById('planned-hotel-form').addEventListener('submit', async (
     dateTo: document.getElementById('ph-to').value,
     points: parseInt(document.getElementById('ph-points').value) || 0,
     qp: parseInt(document.getElementById('ph-qp').value) || 0,
-    note: document.getElementById('ph-note').value
+    note: document.getElementById('ph-note').value,
+    // "erledigt"-Status (markPlannedHotelDone) bleibt beim Bearbeiten erhalten,
+    // statt durchs Neu-Zusammenbauen des Objekts verloren zu gehen.
+    planned: existing ? existing.planned : true
   };
   if (isEdit) {
     const idx = plannedHotels.findIndex(h => h.id === hotel.id);
