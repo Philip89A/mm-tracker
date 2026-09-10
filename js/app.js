@@ -32,6 +32,27 @@ let yearArchive = []; // { year, closedAt, points, qp, meilenAtClose, goalsReach
 let ccMilesBalance = 0; // manuell gepflegter Kreditkarten-Meilen-Stand
 
 const MILES_CATEGORIES = ['Flüge', 'Flughafen', 'Executive Meilen', 'CO2-Kompensation', 'Kreditkarte', 'Hotel', 'Mietwagen', 'Fahrdienst', 'Shopping', 'Parken', 'Zeitschriften-Abo', 'Reise-Buchungsportale', 'Uptrip', 'Fremdprogramm-Umwandlung', 'Kulanz/Sonstiges'];
+
+// Feste Farbe je Kategorie, damit sie in Aufschlüsselung/Liste auf einen
+// Blick optisch unterscheidbar sind — unabhängig von Sortierung/Filterung.
+const CATEGORY_COLORS = {
+  'Flüge': '#4C6EF5',
+  'Flughafen': '#12B886',
+  'Executive Meilen': '#F59F00',
+  'CO2-Kompensation': '#40C057',
+  'Kreditkarte': '#E64980',
+  'Hotel': '#7950F2',
+  'Mietwagen': '#FA5252',
+  'Fahrdienst': '#228BE6',
+  'Shopping': '#FD7E14',
+  'Parken': '#495057',
+  'Zeitschriften-Abo': '#82C91E',
+  'Reise-Buchungsportale': '#15AABF',
+  'Uptrip': '#BE4BDB',
+  'Fremdprogramm-Umwandlung': '#FAB005',
+  'Kulanz/Sonstiges': '#868E96'
+};
+function categoryColor(cat) { return CATEGORY_COLORS[cat] || '#868E96'; }
 const AIRPORT_SUBTYPES = ['Aktionsmeilen', 'Shopping'];
 
 // Kuratierte Liste bekannter/wiederkehrender Miles & More (Lufthansa Group)
@@ -1334,12 +1355,14 @@ function renderMiles() {
 
   // --- Filter-Dropdowns befüllen (Auswahl dabei erhalten) — VOR der
   // Aufschlüsselung, da Aufschlüsselung + Trend jetzt denselben Filter
-  // respektieren wie die Liste unten (nicht mehr immer der Gesamtbestand). ---
+  // respektieren wie die Liste unten (nicht mehr immer der Gesamtbestand).
+  // Kategorie-Filter ist Mehrfachauswahl: leere Auswahl = alle Kategorien. ---
   const catSelect = document.getElementById('mi-filter-category');
-  const prevCat = catSelect.value;
+  const prevCats = new Set(Array.from(catSelect.selectedOptions).map(o => o.value));
   const usedCategories = MILES_CATEGORIES.filter(cat => milesLog.some(mv => mv.category === cat));
-  catSelect.innerHTML = '<option value="">Alle</option>' + usedCategories.map(c => `<option value="${c}">${c}</option>`).join('');
-  if (usedCategories.includes(prevCat)) catSelect.value = prevCat;
+  catSelect.innerHTML = usedCategories.map(c =>
+    `<option value="${c}" ${prevCats.has(c) ? 'selected' : ''}>${c}</option>`
+  ).join('');
 
   const yearSelect = document.getElementById('mi-filter-year');
   const prevYear = yearSelect.value;
@@ -1347,23 +1370,24 @@ function renderMiles() {
   yearSelect.innerHTML = '<option value="">Alle</option>' + usedYears.map(y => `<option value="${y}">${y}</option>`).join('');
   if (usedYears.includes(prevYear)) yearSelect.value = prevYear;
 
-  const filterCat = catSelect.value;
+  const filterCats = Array.from(catSelect.selectedOptions).map(o => o.value);
   const filterYear = yearSelect.value;
   const filtered = milesLog
     .map((mv, idx) => ({ ...mv, idx }))
-    .filter(mv => !filterCat || mv.category === filterCat)
+    .filter(mv => !filterCats.length || filterCats.includes(mv.category))
     .filter(mv => !filterYear || (mv.date || '').startsWith(filterYear));
 
   // --- Aufschlüsselung nach Kategorie — respektiert jetzt den Filter. Bei
-  // aktivem Kategorie-Filter bleibt nur eine Kategorie übrig; statt der
-  // (dann bedeutungslosen) 100%-Vergleichsbalken zeigt sich automatisch eine
-  // Detailansicht mit Quellen-Vergleichsbalken innerhalb dieser Kategorie. ---
+  // Auswahl genau EINER Kategorie zeigt sich statt der (dann bedeutungslosen)
+  // 100%-Vergleichsbalken automatisch eine Detailansicht mit
+  // Quellen-Vergleichsbalken innerhalb dieser Kategorie. ---
   const breakdownEl = document.getElementById('miles-breakdown');
   if (filtered.length === 0) {
     breakdownEl.innerHTML = milesLog.length === 0
       ? '<div class="empty">Noch keine Meilen-Bewegungen erfasst.</div>'
       : '<div class="empty">Keine Bewegungen für diesen Filter.</div>';
   } else {
+    const singleCatMode = filterCats.length === 1;
     let totalGained = 0, totalRedeemed = 0;
     const byCategory = {};
     filtered.forEach(mv => {
@@ -1388,14 +1412,16 @@ function renderMiles() {
     const topCat = sortedCats.length && byCategory[sortedCats[0]].total > 0 ? sortedCats[0] : null;
     const maxCatTotal = Math.max(1, ...sortedCats.map(c => Math.abs(byCategory[c].total)));
 
+    const filterLabel = filterCats.length === 1 ? ` (${filterCats[0]})` : filterCats.length > 1 ? ` (${filterCats.length} Kategorien)` : '';
     const totalsHtml = `<div class="miles-totals-box">
-      <div class="flex-between"><span>Gesamt Zugang${filterCat ? ' (' + filterCat + ')' : ''}</span><span style="color:var(--green); font-weight:700;">+${totalGained.toLocaleString('de-DE')}</span></div>
+      <div class="flex-between"><span>Gesamt Zugang${filterLabel}</span><span style="color:var(--green); font-weight:700;">+${totalGained.toLocaleString('de-DE')}</span></div>
       <div class="flex-between" style="margin-top:4px;"><span>Gesamt Abgang/Einlösung</span><span style="color:var(--red); font-weight:700;">−${totalRedeemed.toLocaleString('de-DE')}</span></div>
       <div class="flex-between" style="margin-top:4px; padding-top:6px; border-top:1px solid var(--gray-border);"><span style="font-weight:700;">Netto</span><span style="font-weight:700;">${(totalGained - totalRedeemed).toLocaleString('de-DE')}</span></div>
     </div>`;
 
     const catRows = sortedCats.map(cat => {
       const data = byCategory[cat];
+      const color = categoryColor(cat);
       const pct = totalGained > 0 ? Math.round((data.gained / totalGained) * 100) : 0;
       const catBarPct = Math.min(100, Math.round((Math.abs(data.total) / maxCatTotal) * 100));
       const maxSourceTotal = Math.max(1, ...Object.values(data.sources).map(v => Math.abs(v)));
@@ -1406,18 +1432,18 @@ function renderMiles() {
           <div class="flex-between" style="font-size:11.5px; color:var(--muted);">
             <span>↳ ${src}</span><span>${data.sources[src].toLocaleString('de-DE')}</span>
           </div>
-          <div class="bar-bg" style="height:5px; margin-top:2px;"><div class="bar-fill q" style="width:${srcBarPct}%"></div></div>
+          <div class="bar-bg" style="height:5px; margin-top:2px;"><div class="bar-fill" style="width:${srcBarPct}%; background:${color}; opacity:0.6;"></div></div>
         </div>`;
       }).join('');
       const metaParts = [`${data.count} ${data.count === 1 ? 'Eintrag' : 'Einträge'}`];
-      if (!filterCat && data.gained > 0) metaParts.push(`${pct}% der gesammelten Meilen`);
+      if (!singleCatMode && data.gained > 0) metaParts.push(`${pct}% der gesammelten Meilen`);
       if (data.redeemed > 0) metaParts.push(`davon ${data.redeemed.toLocaleString('de-DE')} eingelöst`);
       return `<div class="miles-cat-row">
         <div class="flex-between">
-          <span style="font-weight:600; color:var(--navy);">${cat}${cat === topCat && !filterCat ? ' 🏆' : ''}</span>
+          <span style="font-weight:600; color:var(--navy);"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${color}; margin-right:6px;"></span>${cat}${cat === topCat && !singleCatMode ? ' 🏆' : ''}</span>
           <span style="font-weight:700;">${data.total.toLocaleString('de-DE')} Meilen</span>
         </div>
-        ${!filterCat ? `<div class="bar-bg" style="height:6px; margin-top:5px;"><div class="bar-fill q" style="width:${catBarPct}%"></div></div>` : ''}
+        ${!singleCatMode ? `<div class="bar-bg" style="height:6px; margin-top:5px;"><div class="bar-fill" style="width:${catBarPct}%; background:${color};"></div></div>` : ''}
         <div class="miles-cat-meta" style="margin-top:4px;">${metaParts.join(' · ')}</div>
         ${sourceRows}
       </div>`;
@@ -1442,7 +1468,7 @@ function renderMiles() {
   listEl.innerHTML = sorted.map(mv => `<div class="trip">
     <div class="top">
       <div>
-        <div class="route">${mv.category}${mv.source ? ' · ' + mv.source : ''}</div>
+        <div class="route"><span style="display:inline-block; width:9px; height:9px; border-radius:50%; background:${categoryColor(mv.category)}; margin-right:5px;"></span>${mv.category}${mv.source ? ' · ' + mv.source : ''}</div>
         <div class="meta">${mv.date}</div>
         ${mv.note ? `<div class="meta">📝 ${mv.note}</div>` : ''}
       </div>
