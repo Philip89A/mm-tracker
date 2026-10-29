@@ -497,6 +497,7 @@ function render() {
     renderSenatorTracker,
     renderTrips,
     renderYearChart,
+    (typeof renderRouteMap === 'function' ? renderRouteMap : function renderRouteMap() {}),
     renderFlightsNeeded,
     renderPromoTemplates,
     renderPromos,

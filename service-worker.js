@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mm-tracker-v34';
+const CACHE_NAME = 'mm-tracker-v36';
 const APP_SHELL = [
   './',
   './index.html',
@@ -8,7 +8,10 @@ const APP_SHELL = [
   './js/supabase-config.js',
   './js/supabase-client.js',
   './js/db.js',
+  './js/data/airports.js',
+  './js/data/world.js',
   './js/app.js',
+  './js/map.js',
   './js/auth.js',
   './icons/icon-192.png',
   './icons/icon-512.png',

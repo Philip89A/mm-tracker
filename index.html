@@ -318,6 +318,28 @@
       <div id="year-chart"></div>
     </div>
 
+    <div class="card">
+      <h2>🗺️ Streckenkarte</h2>
+      <p class="hint" style="margin-top:0;">Alle Strecken aus dem Trip-Log (erkannt an den IATA-Codes in Großbuchstaben, z.B. „FRA–FCO–FRA“). Durchgezogen = geflogen, gestrichelt = geplant; dickere Linien = öfter geflogen.</p>
+      <div class="row2">
+        <div>
+          <label style="margin-top:0;">Jahr</label>
+          <select id="map-filter-year"><option value="">Alle</option></select>
+        </div>
+        <div>
+          <label style="margin-top:0;">Status</label>
+          <select id="map-filter-status">
+            <option value="">Geflogen + geplant</option>
+            <option value="flown">Nur geflogen</option>
+            <option value="planned">Nur geplant</option>
+          </select>
+        </div>
+      </div>
+      <div id="route-map" class="route-map" style="margin-top:10px;"></div>
+      <p class="hint" id="route-map-stats"></p>
+      <p class="hint" id="route-map-unknown" style="display:none;"></p>
+    </div>
+
   </section>
 
   <!-- TAB: SAMMELN -->
@@ -363,6 +385,55 @@
 
   <!-- TAB: RECHNER -->
   <section id="tab-rechner" class="section">
+
+    <div class="card" id="card-planner">
+      <h2>🧭 Streckenplaner</h2>
+      <p class="hint" style="margin-top:0;">Zeigt, welche Routen über die Lufthansa-Group-Drehkreuze möglich wären und wie viele Points/QP sie bringen — auch die punkteoptimale Variante mit Umstieg. <b>Keine Fahrplan-, Verfügbarkeits- oder Preisdaten:</b> ob eine Teilstrecke wirklich beflogen wird, zeigen die Links zu Google Flights. Die Reichweite wird nach Kontinent geschätzt (Europa ↔ Europa = kontinental); bei Sonderfällen wie Kanaren oder Israel bitte im Trip prüfen.</p>
+      <div class="row2">
+        <div>
+          <label style="margin-top:0;">Von (IATA oder Stadt)</label>
+          <input type="text" id="pl-from" placeholder="FRA" autocomplete="off">
+          <div id="pl-from-sug" class="sug"></div>
+        </div>
+        <div>
+          <label style="margin-top:0;">Nach</label>
+          <input type="text" id="pl-to" placeholder="SIN" autocomplete="off">
+          <div id="pl-to-sug" class="sug"></div>
+        </div>
+      </div>
+      <div class="row2">
+        <div>
+          <label>Klasse</label>
+          <select id="pl-class">
+            <option value="economy">Economy</option>
+            <option value="premium">Premium Economy</option>
+            <option value="business">Business</option>
+            <option value="first">First</option>
+          </select>
+        </div>
+        <div>
+          <label>CO₂-Kompensation?</label>
+          <select id="pl-co2">
+            <option value="0">Nein</option>
+            <option value="30">Ja, ~30% Bonus</option>
+            <option value="80" selected>Ja, ~80% Bonus</option>
+          </select>
+        </div>
+      </div>
+      <div class="row2">
+        <div>
+          <label>Datum (für Links und geplante Trips)</label>
+          <input type="date" id="pl-date">
+        </div>
+        <div>
+          <label style="display:flex; align-items:center; gap:8px; margin-top:32px; font-weight:600; color:var(--text);">
+            <input type="checkbox" id="pl-roundtrip" style="width:auto;"> Hin- und Rückflug
+          </label>
+        </div>
+      </div>
+      <div id="pl-results" style="margin-top:10px;"></div>
+      <p class="hint" id="pl-msg" style="margin:8px 0 0;"></p>
+    </div>
 
     <div class="card">
       <h2>💰 Wertrechner: €/Point & €/QP</h2>
@@ -544,7 +615,10 @@
 <script src="js/supabase-config.js"></script>
 <script src="js/supabase-client.js"></script>
 <script src="js/db.js"></script>
+<script src="js/data/airports.js"></script>
+<script src="js/data/world.js"></script>
 <script src="js/app.js"></script>
+<script src="js/map.js"></script>
 <script src="js/auth.js"></script>
 </body>
 </html>
