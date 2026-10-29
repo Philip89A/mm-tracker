@@ -24,7 +24,6 @@ let valueLog = [];
 let upgrades = [];
 let marketplace = [];
 let senatorGround = { points: 0, qp: 0 };
-let pendingReceivedCards = []; // staged "erhaltene Karte(n)" for the marketplace form, not persisted directly
 let milesLog = [];
 let redemptionIdeas = [];
 let plannedHotels = [];
@@ -201,6 +200,16 @@ function tripPoints(t) {
   const base = pointsForSegment(t.range, t.cls) * t.segments;
   const bonus = Math.round(base * (t.co2 / 100));
   return base + bonus;
+}
+
+// Zusatz-QP, die ein bezahltes Upgrade gegenüber der ursprünglich gebuchten
+// Klasse bringt. Die Punkte selbst stecken schon zu 100% in tripPoints() (Klasse
+// nach dem Upgrade) — dieser Wert dient nur der €/QP-Auswertung des Aufpreises
+// und wird NIRGENDS auf die Summen aufgeschlagen.
+function tripUpgradeDeltaQP(t) {
+  if (!t.upgradeFrom || t.upgradeFrom === t.cls) return 0;
+  const delta = segmentPointsWithCo2(t.range, t.cls, t.co2) - segmentPointsWithCo2(t.range, t.upgradeFrom, t.co2);
+  return Math.max(0, delta) * (t.segments || 1);
 }
 
 function segmentPointsWithCo2(range, cls, co2) {
@@ -448,61 +457,6 @@ function genId() {
   return 'inv_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
 
-// Karten, die einer Kollektion zugeordnet sind, gelten für andere Kollektionen als "belegt".
-function assignedTotalForInv(invId, excludeUptripIdx) {
-  let total = 0;
-  uptripItems.forEach((u, i) => {
-    if (i === excludeUptripIdx) return;
-    (u.assignedCards || []).forEach(a => { if (a.invId === invId) total += a.count; });
-  });
-  return total;
-}
-
-function freeCountForInv(inv, excludeUptripIdx) {
-  return inv.count - assignedTotalForInv(inv.id, excludeUptripIdx);
-}
-
-function uptripHave(u) {
-  return (u.assignedCards || []).reduce((s, a) => s + a.count, 0);
-}
-
-function uptripOrigHave(u) {
-  return (u.assignedCards || []).reduce((s, a) => {
-    const inv = inventory.find(i => i.id === a.invId);
-    return s + (inv && inv.original ? a.count : 0);
-  }, 0);
-}
-
-// Kollektionen aus der Zeit vor der Karten-Verknüpfung nutzten ein Freitextfeld
-// (cardNames). Hier versuchen wir einmalig, dafür passende Inventar-Karten
-// anhand des Namens automatisch zuzuordnen, statt bei 0/needed neu anzufangen.
-function migrateLegacyUptripCardNames() {
-  let changed = false;
-  uptripItems.forEach((u, idx) => {
-    if (u.assignedCards) return;
-    u.assignedCards = [];
-    changed = true;
-    if (!u.cardNames) return;
-    const names = u.cardNames.split(',').map(s => s.trim()).filter(Boolean);
-    const counts = {};
-    names.forEach(n => { const k = n.toLowerCase(); counts[k] = (counts[k] || 0) + 1; });
-    Object.keys(counts).forEach(lname => {
-      let remaining = counts[lname];
-      inventory.forEach(inv => {
-        if (remaining <= 0) return;
-        if (inv.name.toLowerCase() !== lname) return;
-        const free = freeCountForInv(inv, idx);
-        if (free <= 0) return;
-        const take = Math.min(free, remaining);
-        const existing = u.assignedCards.find(a => a.invId === inv.id);
-        if (existing) existing.count += take; else u.assignedCards.push({ invId: inv.id, count: take });
-        remaining -= take;
-      });
-    });
-  });
-  return changed;
-}
-
 // ---------- render ----------
 
 function render() {
@@ -548,10 +502,8 @@ function render() {
     renderPromos,
     renderUptrip,
     renderFristen,
-    renderInventory,
     renderCalc,
     renderUpgrades,
-    renderMarketplace,
     renderMiles,
     renderRedemptionIdeas,
     renderPlannedHotels,
@@ -675,6 +627,9 @@ function renderTrips() {
   if (usedYears.includes(prevYear)) yearSelect.value = prevYear;
   const filterYear = yearSelect.value;
 
+  const upgSummaryEl = document.getElementById('trip-upgrade-summary');
+  upgSummaryEl.style.display = 'none';
+
   if (trips.length === 0) {
     list.innerHTML = '<div class="empty">Noch keine Trips erfasst.</div>';
     return;
@@ -683,6 +638,14 @@ function renderTrips() {
   if (filtered.length === 0) {
     list.innerHTML = '<div class="empty">Keine Trips für dieses Jahr.</div>';
     return;
+  }
+
+  const upgraded = filtered.filter(t => t.upgradeCost > 0 && tripUpgradeDeltaQP(t) > 0);
+  if (upgraded.length > 0) {
+    const cost = upgraded.reduce((s, t) => s + t.upgradeCost, 0);
+    const dq = upgraded.reduce((s, t) => s + tripUpgradeDeltaQP(t), 0);
+    upgSummaryEl.textContent = `⬆️ Upgrades${filterYear ? ' ' + filterYear : ''}: ${upgraded.length} Flug${upgraded.length === 1 ? '' : 'e'}, ${cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} € Aufpreis für +${dq} QP (Ø ${(cost / dq).toLocaleString('de-DE', {minimumFractionDigits: 2})} €/QP) — die Punkte stecken bereits in den Flügen unten.`;
+    upgSummaryEl.style.display = 'block';
   }
   const sorted = [...filtered].sort((a, b) => new Date(b.date) - new Date(a.date));
   list.innerHTML = sorted.map(t => {
@@ -695,6 +658,7 @@ function renderTrips() {
           <div class="meta">${t.date} · ${t.range === 'continental' ? 'Kontinental' : 'Interkont.'} · ${labelClass(t.cls)} · ${t.segments} Segm.${t.co2 > 0 ? ' · CO₂ +' + t.co2 + '%' : ''}</div>
           ${t.historical ? `<div class="meta"><span class="tag mid">🕰️ Historisch — nicht in Gesamtsumme</span></div>` : ''}
           ${t.planned ? `<div class="meta"><span class="tag ok">📅 Geplant</span></div>` : ''}
+          ${tripUpgradeDeltaQP(t) > 0 ? `<div class="meta">⬆️ Upgrade von ${labelClass(t.upgradeFrom)}${t.upgradeCost > 0 ? ': ' + t.upgradeCost.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' € für +' + tripUpgradeDeltaQP(t) + ' QP (' + (t.upgradeCost / tripUpgradeDeltaQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP)' : ''}</div>` : ''}
           ${t.note ? `<div class="meta">📝 ${t.note}</div>` : ''}
         </div>
         <div class="pts">
@@ -959,63 +923,6 @@ window.downloadFristIcs = function(idx) {
   downloadBlob(lines.join('\r\n'), 'text/calendar;charset=utf-8;', (f.title || 'Frist').replace(/[^a-z0-9]+/gi, '_') + '.ics');
 };
 
-const cardTypeLabel = { airline: 'Airline', city: 'City', aircraft: 'Flugzeugtyp' };
-
-function renderInventory() {
-  const list = document.getElementById('inv-list');
-  document.getElementById('inv-count').textContent = inventory.length;
-  const totalCost = inventory.reduce((sum, i) => sum + (parseFloat(i.cost) || 0), 0);
-  document.getElementById('inv-summary').textContent = totalCost > 0
-    ? `Gesamt bezahlt für Karten: ${totalCost.toLocaleString('de-DE', {minimumFractionDigits: 2})} €`
-    : '';
-
-  const filterType = document.getElementById('inv-filter-type').value;
-  const filterOriginal = document.getElementById('inv-filter-original').value;
-
-  const airlineSelect = document.getElementById('inv-filter-airline');
-  const filterAirline = airlineSelect.value;
-  const airlines = [...new Set(inventory.map(i => i.airline).filter(Boolean))].sort();
-  airlineSelect.innerHTML = '<option value="">Alle</option>' + airlines.map(a => `<option value="${a}">${a}</option>`).join('');
-  if (airlines.includes(filterAirline)) airlineSelect.value = filterAirline;
-
-  const filtered = inventory
-    .map((i, idx) => ({ ...i, idx }))
-    .filter(i => !filterType || (filterType === 'none' ? !i.cardType : i.cardType === filterType))
-    .filter(i => !filterAirline || i.airline === filterAirline)
-    .filter(i => filterOriginal === '' || String(i.original ? 1 : 0) === filterOriginal);
-
-  if (inventory.length === 0) {
-    list.innerHTML = '<div class="empty">Noch keine Karten erfasst.</div>';
-    return;
-  }
-  if (filtered.length === 0) {
-    list.innerHTML = '<div class="empty">Keine Karten für diesen Filter.</div>';
-    return;
-  }
-  const statusLabel = { neu: 'Neu', duplikat: 'Duplikat', eingeloest: 'Eingelöst' };
-  const statusTag = { neu: 'ok', duplikat: 'mid', eingeloest: 'low' };
-  list.innerHTML = filtered.map(i => {
-    const typeParts = [];
-    if (i.cardType) typeParts.push(cardTypeLabel[i.cardType] || i.cardType);
-    if (i.cardType === 'aircraft' && i.airline) typeParts.push(i.airline);
-    const assigned = i.id ? assignedTotalForInv(i.id) : 0;
-    const free = i.count - assigned;
-    return `<div class="trip">
-    <div class="top">
-      <div>
-        <div class="route">${i.name} ${i.count > 1 ? `×${i.count}` : ''}</div>
-        <div class="meta">${typeParts.length ? typeParts.join(' · ') + ' · ' : ''}${i.original ? 'Original' : 'Nicht original'}</div>
-        <div class="meta">${assigned > 0 ? `${free} frei · ${assigned} in Kollektion(en)` : `${free} frei`}</div>
-        <div class="meta">${i.cost ? parseFloat(i.cost).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' € bezahlt' : 'kostenlos erhalten'}</div>
-        ${i.note ? `<div class="meta">📝 ${i.note}</div>` : ''}
-      </div>
-      <div class="pts"><span class="tag ${statusTag[i.status]}">${statusLabel[i.status]}</span></div>
-    </div>
-    <button class="del" onclick="deleteInventory(${i.idx})">entfernen</button>
-  </div>`;
-  }).join('');
-}
-
 function renderCalc() {
   const list = document.getElementById('calc-list');
   if (valueLog.length === 0) {
@@ -1050,11 +957,14 @@ function renderCalc() {
   </div>`).join('');
 }
 
+// Nur noch Archiv-Ansicht für Alt-Einträge aus der Zeit vor dem Upgrade-Feld
+// im Trip; die Karte erscheint nur, wenn es solche Einträge gibt.
 function renderUpgrades() {
   const list = document.getElementById('upg-list');
+  document.getElementById('upg-archive-card').style.display = upgrades.length ? 'block' : 'none';
   document.getElementById('upg-count').textContent = upgrades.length;
   if (upgrades.length === 0) {
-    list.innerHTML = '<div class="empty">Noch keine Upgrades erfasst.</div>';
+    list.innerHTML = '';
     return;
   }
   const sorted = [...upgrades].sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -1109,13 +1019,9 @@ function renderUptrip() {
 
   list.innerHTML = uptripItems.map((u, idx) => {
     const needed = u.needed || 1;
-    const have = Math.min(uptripHave(u), needed);
+    const have = Math.min(u.have || 0, needed);
     const complete = have >= needed;
     const offset = RING_C * (1 - have / needed);
-
-    const origNeeded = u.origNeeded || 0;
-    const origHave = uptripOrigHave(u);
-    const origSatisfied = origHave >= origNeeded;
 
     const maxRedemptions = u.maxRedemptions || 1;
     const redemptionCount = u.redemptionCount || 0;
@@ -1133,29 +1039,9 @@ function renderUptrip() {
       actionHtml = `<span class="tag ok">✅ Limit erreicht (${redemptionCount}/${maxRedemptions})</span>`;
     } else if (!complete) {
       actionHtml = `<span class="tag mid">${needed - have} Karte(n) fehlen</span>`;
-    } else if (!origSatisfied) {
-      actionHtml = `<span class="tag mid">${origNeeded - origHave} Original-Karte(n) fehlen</span>`;
     } else {
       actionHtml = `<button class="btn small" style="background:var(--green); color:white;" onclick="redeemUptrip(${idx})">✅ Jetzt einlösen</button>`;
     }
-
-    const assignedRows = (u.assignedCards || []).map(a => {
-      const inv = inventory.find(i => i.id === a.invId);
-      const label = inv ? inv.name + (inv.original ? ' · Original' : '') : '(gelöschte Karte)';
-      return `<div class="flex-between" style="margin-top:4px;">
-        <span>${label}${a.count > 1 ? ' ×' + a.count : ''}</span>
-        <button class="del" onclick="unassignCardFromUptrip(${idx}, '${a.invId}')">− entfernen</button>
-      </div>`;
-    }).join('');
-
-    const availableCards = inventory.filter(i => i.status !== 'eingeloest' && freeCountForInv(i, idx) > 0);
-    const assignPicker = !limitReached ? `<div style="margin-top:8px;">
-        <select id="assign-select-${idx}" multiple size="${Math.min(6, Math.max(3, availableCards.length))}" style="width:100%;">
-          ${availableCards.map(i => `<option value="${i.id}">${i.name} (frei: ${freeCountForInv(i, idx)})</option>`).join('')}
-        </select>
-        <p class="hint" style="margin:4px 0 0;">Mehrere Karten auswählen: am Handy antippen, am Computer Strg/Cmd gedrückt halten.</p>
-        <button class="btn small secondary" style="width:100%; margin-top:6px;" onclick="assignSelectedCards(${idx})">+ Ausgewählte zuordnen</button>
-      </div>` : '';
 
     return `<div class="uptrip-card">
       <div class="uptrip-card-top">
@@ -1171,16 +1057,12 @@ function renderUptrip() {
           <div class="reward">${rewardText}</div>
         </div>
       </div>
+      ${!limitReached ? `<div class="flex-between" style="margin-top:10px; gap:8px;">
+        <button type="button" class="btn small secondary" style="flex:1;" onclick="adjustUptripHave(${idx}, -1)" ${have <= 0 ? 'disabled' : ''}>− Karte</button>
+        <button type="button" class="btn small secondary" style="flex:1;" onclick="adjustUptripHave(${idx}, 1)" ${complete ? 'disabled' : ''}>+ Karte</button>
+      </div>` : ''}
       <div class="uptrip-row">
         <span>🔁 Einlösungen</span><span>${redemptionCount}/${maxRedemptions}</span>
-      </div>
-      ${origNeeded > 0 ? `<div class="uptrip-row ${origSatisfied ? 'ok' : 'warn'}">
-        <span>✈️ Min. ${origNeeded} Original-Karten</span><span>${origHave}/${origNeeded} ${origSatisfied ? '✅' : '⚠️'}</span>
-      </div>` : ''}
-      <div class="uptrip-row" style="display:block;">
-        <div class="flex-between"><span>🔗 Zugeordnete Karten</span></div>
-        ${assignedRows || '<div class="meta-line" style="margin-top:2px;">Noch keine Karten zugeordnet.</div>'}
-        ${assignPicker}
       </div>
       ${u.note ? `<div class="meta-line">📝 ${u.note}</div>` : ''}
       <div class="actions">
@@ -1193,91 +1075,6 @@ function renderUptrip() {
       </div>
     </div>`;
   }).join('');
-}
-
-function renderMpGivenSelect() {
-  const select = document.getElementById('mp-given-select');
-  const previouslySelected = new Set(Array.from(select.selectedOptions).map(o => o.value));
-
-  const available = inventory.filter(i => i.status === 'neu' && i.count > 0);
-  select.innerHTML = available.map(i =>
-    `<option value="${i.id}" ${previouslySelected.has(i.id) ? 'selected' : ''}>${i.name} (${i.count}x vorhanden)</option>`
-  ).join('');
-
-  renderMpQtyRows();
-}
-
-function renderMpQtyRows() {
-  const select = document.getElementById('mp-given-select');
-  const rows = document.getElementById('mp-given-qty-rows');
-  const selected = Array.from(select.selectedOptions);
-
-  // Keep any already-entered quantities when the row set changes.
-  const existingQty = {};
-  rows.querySelectorAll('input[data-inv-id]').forEach(inp => { existingQty[inp.dataset.invId] = inp.value; });
-
-  rows.innerHTML = selected.map(opt => {
-    const inv = inventory.find(i => i.id === opt.value);
-    const max = inv ? inv.count : 1;
-    const val = existingQty[opt.value] || 1;
-    return `<div class="qty-row">
-      <label>${inv ? inv.name : opt.textContent}</label>
-      <input type="number" data-inv-id="${opt.value}" min="1" max="${max}" value="${val}">
-    </div>`;
-  }).join('');
-}
-
-function renderMpReceivedList() {
-  const list = document.getElementById('mp-received-list');
-  if (pendingReceivedCards.length === 0) {
-    list.innerHTML = '';
-    return;
-  }
-  list.innerHTML = pendingReceivedCards.map((c, idx) => `<div class="pending-row">
-    <span>${c.name}${c.count > 1 ? ' ×' + c.count : ''}${c.cardType ? ' · ' + (cardTypeLabel[c.cardType] || c.cardType) : ''}</span>
-    <button type="button" class="del" onclick="removePendingReceivedCard(${idx})">entfernen</button>
-  </div>`).join('');
-}
-
-window.removePendingReceivedCard = function(idx) {
-  pendingReceivedCards.splice(idx, 1);
-  renderMpReceivedList();
-};
-
-function renderMarketplace() {
-  renderMpGivenSelect();
-  const list = document.getElementById('mp-list');
-  document.getElementById('mp-count').textContent = marketplace.length;
-  const totalCost = marketplace.reduce((s, m) => s + (parseFloat(m.cost) || 0), 0);
-  document.getElementById('mp-summary').textContent = marketplace.length > 0
-    ? `Gesamt ausgegeben für Tausche/Mixer: ${totalCost.toLocaleString('de-DE', {minimumFractionDigits: 2})} €`
-    : '';
-  if (marketplace.length === 0) {
-    list.innerHTML = '<div class="empty">Noch keine Tausche erfasst.</div>';
-    return;
-  }
-  const sorted = [...marketplace].sort((a, b) => new Date(b.date) - new Date(a.date));
-  list.innerHTML = sorted.map(m => {
-    const idx = marketplace.indexOf(m);
-    const givenText = formatCardList(m.given);
-    const receivedText = formatCardList(m.received);
-    return `<div class="trip">
-      <div class="top">
-        <div>
-          <div class="route">${m.type}${m.ratio ? ' · ' + m.ratio : ''}</div>
-          <div class="meta">${m.date} · abgegeben: ${givenText} · erhalten: ${receivedText}</div>
-          ${m.note ? `<div class="meta">📝 ${m.note}</div>` : ''}
-        </div>
-        <div class="pts"><div class="p">${parseFloat(m.cost).toLocaleString('de-DE', {minimumFractionDigits: 2})} €</div></div>
-      </div>
-      <button class="del" onclick="deleteMarketplace(${idx})">entfernen</button>
-    </div>`;
-  }).join('');
-}
-
-function formatCardList(arr) {
-  if (!arr || arr.length === 0) return '–';
-  return arr.map(c => c.name + (c.count > 1 ? ' ×' + c.count : '')).join(', ');
 }
 
 function downloadBlob(content, mimeType, filename) {
@@ -1297,7 +1094,7 @@ function csvEscape(v) {
 }
 
 window.exportTripsCsv = function() {
-  const header = ['Datum', 'Strecke', 'Reichweite', 'Klasse', 'Segmente', 'CO2-Bonus %', 'Points/QP', 'Historisch', 'Geplant', 'Notiz'];
+  const header = ['Datum', 'Strecke', 'Reichweite', 'Klasse', 'Segmente', 'CO2-Bonus %', 'Points/QP', 'Upgrade von', 'Upgrade-Kosten €', 'Zusatz-QP durch Upgrade', 'Historisch', 'Geplant', 'Notiz'];
   const sorted = [...trips].sort((a, b) => new Date(a.date) - new Date(b.date));
   const rows = sorted.map(t => [
     t.date,
@@ -1307,6 +1104,9 @@ window.exportTripsCsv = function() {
     t.segments,
     t.co2,
     tripPoints(t),
+    t.upgradeFrom ? labelClass(t.upgradeFrom) : '',
+    t.upgradeCost || '',
+    tripUpgradeDeltaQP(t) || '',
     t.historical ? 'Ja' : 'Nein',
     t.planned ? 'Ja' : 'Nein',
     t.note || ''
@@ -1642,20 +1442,14 @@ async function loadAll() {
   promos = await DB.get(KEY_PROMOS, []);
   uptripItems = await DB.get(KEY_UPTRIP, []);
   fristen = await DB.get(KEY_FRISTEN, []);
-  inventory = await DB.get(KEY_INVENTORY, []);
   valueLog = await DB.get(KEY_VALUECALC, []);
   upgrades = await DB.get(KEY_UPGRADES, []);
-  marketplace = await DB.get(KEY_MARKETPLACE, []);
   senatorGround = await DB.get(KEY_SENATOR_GROUND, senatorGround);
   milesLog = await DB.get(KEY_MILES_LOG, []);
   redemptionIdeas = await DB.get(KEY_REDEMPTION_IDEAS, []);
   plannedHotels = await DB.get(KEY_PLANNED_HOTELS, []);
   yearArchive = await DB.get(KEY_YEAR_ARCHIVE, []);
   ccMilesBalance = await DB.get(KEY_CC_MILES_BALANCE, 0);
-
-  let inventoryMigrated = false;
-  inventory.forEach(i => { if (!i.id) { i.id = genId(); inventoryMigrated = true; } });
-  if (inventoryMigrated) await saveInventory();
 
   let tripsMigrated = false;
   trips.forEach(t => { if (!t.id) { t.id = genId(); tripsMigrated = true; } });
@@ -1685,7 +1479,17 @@ async function loadAll() {
   });
   if (uptripDatesMigrated) await saveUptrip();
 
-  if (migrateLegacyUptripCardNames()) await saveUptrip();
+  // Uptrip wurde auf einen einfachen Kartenzähler pro Kollektion vereinfacht
+  // (Karteninventar/Marktplatz entfallen). Bisherige Inventar-Zuordnungen
+  // werden einmalig in den Zähler übernommen.
+  let uptripHaveMigrated = false;
+  uptripItems.forEach(u => {
+    if (typeof u.have !== 'number') {
+      u.have = Math.min(u.needed || 1, (u.assignedCards || []).reduce((s, a) => s + (a.count || 0), 0));
+      uptripHaveMigrated = true;
+    }
+  });
+  if (uptripHaveMigrated) await saveUptrip();
 
   document.getElementById('base-p').value = baseline.p;
   document.getElementById('base-q').value = baseline.q;
@@ -1714,41 +1518,17 @@ window.deleteTrip = async function(idx) {
 };
 window.deletePromo = async function(idx) { promos.splice(idx, 1); await savePromos(); render(); };
 window.deleteFristen = async function(idx) { fristen.splice(idx, 1); await saveFristen(); render(); };
-window.deleteInventory = async function(idx) { inventory.splice(idx, 1); await saveInventory(); render(); };
 window.deleteCalc = async function(idx) { valueLog.splice(idx, 1); await saveValueLog(); render(); };
 window.deleteUpgrade = async function(idx) { upgrades.splice(idx, 1); await saveUpgrades(); render(); };
-window.deleteMarketplace = async function(idx) { marketplace.splice(idx, 1); await saveMarketplace(); render(); };
 window.deleteUptrip = async function(idx) { uptripItems.splice(idx, 1); await saveUptrip(); render(); };
 window.deleteMilesMovement = async function(idx) { milesLog.splice(idx, 1); await saveMilesLog(); render(); };
 window.deleteRedemptionIdea = async function(idx) { redemptionIdeas.splice(idx, 1); await saveRedemptionIdeas(); render(); };
 window.deletePlannedHotel = async function(idx) { plannedHotels.splice(idx, 1); await savePlannedHotels(); render(); };
 
-window.assignSelectedCards = async function(idx) {
-  const select = document.getElementById(`assign-select-${idx}`);
-  if (!select) return;
-  const ids = Array.from(select.selectedOptions).map(o => o.value).filter(Boolean);
-  if (ids.length === 0) return;
+window.adjustUptripHave = async function(idx, delta) {
   const u = uptripItems[idx];
   if (!u) return;
-  u.assignedCards = u.assignedCards || [];
-  ids.forEach(invId => {
-    const inv = inventory.find(i => i.id === invId);
-    if (!inv || freeCountForInv(inv, idx) <= 0) return;
-    const existing = u.assignedCards.find(a => a.invId === invId);
-    if (existing) existing.count += 1;
-    else u.assignedCards.push({ invId, count: 1 });
-  });
-  await saveUptrip();
-  render();
-};
-
-window.unassignCardFromUptrip = async function(idx, invId) {
-  const u = uptripItems[idx];
-  if (!u || !u.assignedCards) return;
-  const existing = u.assignedCards.find(a => a.invId === invId);
-  if (!existing) return;
-  existing.count -= 1;
-  if (existing.count <= 0) u.assignedCards = u.assignedCards.filter(a => a.invId !== invId);
+  u.have = Math.max(0, Math.min(u.needed || 1, (u.have || 0) + delta));
   await saveUptrip();
   render();
 };
@@ -1759,28 +1539,17 @@ window.redeemUptrip = async function(idx) {
   const maxRedemptions = u.maxRedemptions || 1;
   const redemptionCount = u.redemptionCount || 0;
   if (redemptionCount >= maxRedemptions) return;
+  if ((u.have || 0) < (u.needed || 1)) return;
 
   const parts = [];
   if (u.rewardPoints) parts.push(`+${u.rewardPoints} Points`);
   if (u.rewardQP) parts.push(`+${u.rewardQP} Qualifying Points`);
   if (u.rewardMeilen) parts.push(`+${u.rewardMeilen} Meilen`);
   if (u.rewardOther) parts.push(u.rewardOther);
-  const assignedNames = (u.assignedCards || []).map(a => {
-    const inv = inventory.find(i => i.id === a.invId);
-    return inv ? `${inv.name}${a.count > 1 ? ' ×' + a.count : ''}` : null;
-  }).filter(Boolean);
-  const msg = `"${u.name}" einlösen (${redemptionCount + 1}/${maxRedemptions})?\n\nDu erhältst:\n${parts.join('\n') || '(keine numerische Prämie hinterlegt)'}\n\nDas wird sofort zu deinem Dashboard addiert.${assignedNames.length ? '\nZugeordnete Karten werden aus dem Inventar abgezogen: ' + assignedNames.join(', ') : ''}`;
+  const msg = `"${u.name}" einlösen (${redemptionCount + 1}/${maxRedemptions})?\n\nDu erhältst:\n${parts.join('\n') || '(keine numerische Prämie hinterlegt)'}\n\nDas wird sofort zu deinem Dashboard addiert, der Kartenzähler geht um ${u.needed || 1} zurück.`;
   if (!confirm(msg)) return;
 
-  (u.assignedCards || []).forEach(a => {
-    const inv = inventory.find(i => i.id === a.invId);
-    if (inv) {
-      inv.count -= a.count;
-      if (inv.count <= 0) { inv.status = 'eingeloest'; inv.count = 0; }
-    }
-  });
-  await saveInventory();
-
+  u.have = Math.max(0, (u.have || 0) - (u.needed || 1));
   u.redemptionCount = redemptionCount + 1;
   u.redeemedDate = new Date().toISOString().slice(0, 10);
   // Ein Datum pro Einlösung merken (nicht nur das letzte), damit Points/QP
@@ -1788,7 +1557,6 @@ window.redeemUptrip = async function(idx) {
   // nur Meilen bleiben jahresübergreifend gültig.
   u.redemptionDates = u.redemptionDates || [];
   u.redemptionDates.push(u.redeemedDate);
-  u.assignedCards = [];
 
   uptripItems[idx] = u;
   await saveUptrip();
@@ -1798,9 +1566,10 @@ window.redeemUptrip = async function(idx) {
 window.undoUptrip = async function(idx) {
   const u = uptripItems[idx];
   if (!u || !(u.redemptionCount > 0)) return;
-  if (!confirm(`Letzte Einlösung von "${u.name}" rückgängig machen? Nur die Points/QP/Meilen dieser Einlösung werden aus dem Dashboard wieder abgezogen. Die dafür verbrauchten Karten wurden bereits aus dem Inventar entfernt und werden NICHT automatisch zurückgebucht — das musst du manuell im Karteninventar korrigieren, falls nötig.`)) return;
+  if (!confirm(`Letzte Einlösung von "${u.name}" rückgängig machen? Die Points/QP/Meilen dieser Einlösung werden aus dem Dashboard wieder abgezogen und die ${u.needed || 1} Karten dem Zähler wieder gutgeschrieben.`)) return;
   u.redemptionCount -= 1;
   if (u.redemptionDates && u.redemptionDates.length) u.redemptionDates.pop();
+  u.have = Math.min(u.needed || 1, (u.have || 0) + (u.needed || 1));
   uptripItems[idx] = u;
   await saveUptrip();
   render();
@@ -1845,6 +1614,8 @@ window.startEditTrip = function(idx) {
   document.getElementById('t-note').value = t.note || '';
   document.getElementById('t-historical').checked = !!t.historical;
   document.getElementById('t-planned').checked = !!t.planned;
+  document.getElementById('t-upgrade-from').value = t.upgradeFrom || '';
+  document.getElementById('t-upgrade-cost').value = t.upgradeCost || '';
   const linkedMiles = milesLog.filter(mv => mv.sourceTripId === t.id);
   document.getElementById('t-miles').value = (linkedMiles.find(mv => mv.category === 'Flüge') || {}).amount || '';
   document.getElementById('t-exec-miles').value = (linkedMiles.find(mv => mv.category === 'Executive Meilen') || {}).amount || '';
@@ -1877,7 +1648,9 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     co2: parseInt(document.getElementById('t-co2').value) || 0,
     note: document.getElementById('t-note').value,
     historical: document.getElementById('t-historical').checked,
-    planned: document.getElementById('t-planned').checked
+    planned: document.getElementById('t-planned').checked,
+    upgradeFrom: document.getElementById('t-upgrade-from').value,
+    upgradeCost: parseFloat(document.getElementById('t-upgrade-cost').value) || 0
   };
   if (isEdit) {
     const idx = trips.findIndex(t => t.id === tripId);
@@ -1944,36 +1717,6 @@ document.getElementById('fristen-form').addEventListener('submit', async (e) => 
   render();
 });
 
-document.getElementById('inv-type').addEventListener('change', () => {
-  const isAircraft = document.getElementById('inv-type').value === 'aircraft';
-  document.getElementById('inv-airline-wrap').style.display = isAircraft ? 'block' : 'none';
-});
-
-document.getElementById('inv-filter-type').addEventListener('change', renderInventory);
-document.getElementById('inv-filter-airline').addEventListener('change', renderInventory);
-document.getElementById('inv-filter-original').addEventListener('change', renderInventory);
-
-document.getElementById('inv-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const cardType = document.getElementById('inv-type').value;
-  inventory.push({
-    id: genId(),
-    name: document.getElementById('inv-name').value,
-    count: parseInt(document.getElementById('inv-qty').value) || 1,
-    cardType: cardType || null,
-    airline: cardType === 'aircraft' ? document.getElementById('inv-airline').value : '',
-    original: document.getElementById('inv-original').value === '1',
-    status: document.getElementById('inv-status').value,
-    cost: parseFloat(document.getElementById('inv-cost').value) || 0,
-    note: document.getElementById('inv-note').value
-  });
-  await saveInventory();
-  e.target.reset();
-  document.getElementById('inv-qty').value = 1;
-  document.getElementById('inv-airline-wrap').style.display = 'none';
-  render();
-});
-
 document.getElementById('calc-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   valueLog.push({
@@ -1989,28 +1732,10 @@ document.getElementById('calc-form').addEventListener('submit', async (e) => {
   render();
 });
 
-document.getElementById('upg-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  upgrades.push({
-    date: document.getElementById('ug-date').value,
-    route: document.getElementById('ug-route').value,
-    from: document.getElementById('ug-from').value,
-    to: document.getElementById('ug-to').value,
-    cost: parseFloat(document.getElementById('ug-cost').value) || 0,
-    range: document.getElementById('ug-range').value,
-    co2: parseInt(document.getElementById('ug-co2').value) || 0,
-    note: document.getElementById('ug-note').value
-  });
-  await saveUpgrades();
-  e.target.reset();
-  render();
-});
-
 document.getElementById('uptrip-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const name = document.getElementById('up-name').value;
+  const name = document.getElementById('up-name').value.trim();
   const needed = parseInt(document.getElementById('up-needed').value) || 1;
-  const origNeeded = parseInt(document.getElementById('up-orig-needed').value) || 0;
   const maxRedemptions = parseInt(document.getElementById('up-max-redemptions').value) || 1;
   const rewardPoints = parseInt(document.getElementById('up-reward-p').value) || 0;
   const rewardQP = parseInt(document.getElementById('up-reward-q').value) || 0;
@@ -2020,110 +1745,20 @@ document.getElementById('uptrip-form').addEventListener('submit', async (e) => {
   const existingIdx = uptripItems.findIndex(u => u.name.toLowerCase() === name.toLowerCase());
   const existing = existingIdx >= 0 ? uptripItems[existingIdx] : null;
   const item = {
-    name, needed, origNeeded, maxRedemptions, rewardPoints, rewardQP, rewardMeilen, rewardOther, note,
-    assignedCards: existing ? (existing.assignedCards || []) : [],
-    cardNames: existing ? existing.cardNames : '',
+    name, needed, maxRedemptions, rewardPoints, rewardQP, rewardMeilen, rewardOther, note,
+    have: existing ? Math.min(existing.have || 0, needed) : 0,
     redemptionCount: existing ? (existing.redemptionCount || 0) : 0,
+    redemptionDates: existing ? (existing.redemptionDates || []) : [],
     redeemedDate: existing ? existing.redeemedDate : null
   };
   if (existingIdx >= 0) uptripItems[existingIdx] = item;
   else uptripItems.push(item);
   await saveUptrip();
   e.target.reset();
-  render();
-});
-
-document.getElementById('mp-given-select').addEventListener('change', renderMpQtyRows);
-
-document.getElementById('mp-recv-type').addEventListener('change', () => {
-  const isAircraft = document.getElementById('mp-recv-type').value === 'aircraft';
-  document.getElementById('mp-recv-airline-wrap').style.display = isAircraft ? 'block' : 'none';
-});
-
-document.getElementById('mp-recv-add-btn').addEventListener('click', () => {
-  const name = document.getElementById('mp-recv-name').value.trim();
-  if (!name) { alert('Bitte einen Kartennamen eingeben.'); return; }
-  const cardType = document.getElementById('mp-recv-type').value;
-  pendingReceivedCards.push({
-    name,
-    count: parseInt(document.getElementById('mp-recv-qty').value) || 1,
-    cardType: cardType || null,
-    airline: cardType === 'aircraft' ? document.getElementById('mp-recv-airline').value : '',
-    original: document.getElementById('mp-recv-original').value === '1',
-    status: document.getElementById('mp-recv-status').value,
-    cost: parseFloat(document.getElementById('mp-recv-cost').value) || 0,
-    note: document.getElementById('mp-recv-note').value
-  });
-  renderMpReceivedList();
-
-  document.getElementById('mp-recv-name').value = '';
-  document.getElementById('mp-recv-qty').value = 1;
-  document.getElementById('mp-recv-type').value = '';
-  document.getElementById('mp-recv-original').value = '1';
-  document.getElementById('mp-recv-airline').value = '';
-  document.getElementById('mp-recv-airline-wrap').style.display = 'none';
-  document.getElementById('mp-recv-status').value = 'neu';
-  document.getElementById('mp-recv-cost').value = '';
-  document.getElementById('mp-recv-note').value = '';
-});
-
-document.getElementById('mp-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-
-  // Abgegebene Karten: direkt vom gewählten Inventar-Eintrag abziehen.
-  const givenRows = Array.from(document.querySelectorAll('#mp-given-qty-rows input[data-inv-id]'));
-  const given = [];
-  givenRows.forEach(row => {
-    const inv = inventory.find(i => i.id === row.dataset.invId);
-    if (!inv) return;
-    const qty = Math.max(1, Math.min(inv.count, parseInt(row.value) || 1));
-    given.push({ invId: inv.id, name: inv.name, count: qty });
-    inv.count -= qty;
-    if (inv.count <= 0) { inv.status = 'eingeloest'; inv.count = 0; }
-  });
-
-  // Erhaltene Karten: bestehenden passenden Eintrag erhöhen, sonst neu anlegen.
-  const received = pendingReceivedCards.map(c => ({ ...c }));
-  received.forEach(c => {
-    const existing = inventory.find(i =>
-      i.status !== 'eingeloest' &&
-      i.name.toLowerCase() === c.name.toLowerCase() &&
-      (i.cardType || null) === (c.cardType || null) &&
-      (i.airline || '') === (c.airline || '')
-    );
-    if (existing) {
-      existing.count += c.count;
-    } else {
-      inventory.push({
-        id: genId(),
-        name: c.name,
-        count: c.count,
-        cardType: c.cardType,
-        airline: c.airline,
-        original: c.original,
-        status: c.status,
-        cost: c.cost,
-        note: c.note || 'aus Tausch/Mixer erhalten'
-      });
-    }
-  });
-
-  await saveInventory();
-
-  marketplace.push({
-    date: document.getElementById('mp-date').value,
-    type: document.getElementById('mp-type').value,
-    given, received,
-    ratio: document.getElementById('mp-ratio').value,
-    cost: parseFloat(document.getElementById('mp-cost').value) || 0,
-    note: document.getElementById('mp-note').value
-  });
-  await saveMarketplace();
-
-  pendingReceivedCards = [];
-  e.target.reset();
-  document.getElementById('mp-cost').value = '1.99';
-  document.getElementById('mp-given-qty-rows').innerHTML = '';
+  document.getElementById('up-max-redemptions').value = 1;
+  document.getElementById('up-reward-p').value = 0;
+  document.getElementById('up-reward-q').value = 0;
+  document.getElementById('up-reward-m').value = 0;
   render();
 });
 

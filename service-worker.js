@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mm-tracker-v33';
+const CACHE_NAME = 'mm-tracker-v34';
 const APP_SHELL = [
   './',
   './index.html',
