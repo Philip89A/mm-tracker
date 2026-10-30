@@ -471,7 +471,96 @@
     }
   }
 
+  // ================================================================ Push-Benachrichtigungen
+
+  const PUSH_SUPPORTED = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+  function b64ToBytes(b64) {
+    const pad = '='.repeat((4 - b64.length % 4) % 4);
+    const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from(raw, c => c.charCodeAt(0));
+  }
+
+  async function currentPushSub() {
+    const reg = await navigator.serviceWorker.ready;
+    return reg.pushManager.getSubscription();
+  }
+
+  async function renderPushStatus() {
+    const st = document.getElementById('push-status');
+    if (!st) return;
+    const en = document.getElementById('push-enable-btn'), ts = document.getElementById('push-test-btn'), di = document.getElementById('push-disable-btn');
+    const show = (on) => { en.style.display = on ? 'none' : ''; ts.style.display = on ? '' : 'none'; di.style.display = on ? '' : 'none'; };
+    if (!PUSH_SUPPORTED) {
+      show(false); en.disabled = true;
+      st.textContent = 'Dieses Gerät/dieser Browser unterstützt keine Push-Nachrichten. Auf dem iPhone die App erst zum Home-Bildschirm hinzufügen und von dort öffnen.';
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      show(false); en.disabled = true;
+      st.textContent = 'Benachrichtigungen sind für diese App blockiert. Das lässt sich nur in den Geräte- bzw. Browser-Einstellungen wieder erlauben.';
+      return;
+    }
+    en.disabled = false;
+    try {
+      const sub = await currentPushSub();
+      show(!!sub);
+      st.textContent = sub ? '✅ Auf diesem Gerät aktiv.' : 'Auf diesem Gerät nicht aktiviert.';
+    } catch (e) {
+      show(false);
+      st.textContent = 'Status konnte nicht ermittelt werden.';
+    }
+  }
+
+  async function enablePush() {
+    const msg = document.getElementById('push-msg');
+    try {
+      msg.textContent = 'Aktiviere …';
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { msg.textContent = 'Ohne Erlaubnis keine Benachrichtigungen.'; renderPushStatus(); return; }
+      const { publicKey } = await callEdge('deadline-push', { action: 'public-key' });
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
+      await callEdge('deadline-push', { action: 'subscribe', subscription: sub.toJSON() });
+      msg.textContent = 'Aktiviert. Mit „Testnachricht senden“ kannst du es prüfen.';
+    } catch (e) {
+      msg.textContent = 'Aktivieren fehlgeschlagen: ' + e.message;
+    }
+    renderPushStatus();
+  }
+
+  async function disablePush() {
+    const msg = document.getElementById('push-msg');
+    try {
+      const sub = await currentPushSub();
+      if (sub) {
+        await callEdge('deadline-push', { action: 'unsubscribe', endpoint: sub.endpoint }).catch(() => {});
+        await sub.unsubscribe();
+      }
+      msg.textContent = 'Auf diesem Gerät deaktiviert.';
+    } catch (e) {
+      msg.textContent = 'Deaktivieren fehlgeschlagen: ' + e.message;
+    }
+    renderPushStatus();
+  }
+
+  async function testPush() {
+    const msg = document.getElementById('push-msg');
+    try {
+      const r = await callEdge('deadline-push', { action: 'test' });
+      msg.textContent = r.sent ? `Testnachricht an ${r.sent} von ${r.devices} Gerät(en) gesendet.` : 'Senden war nicht erfolgreich — bitte deaktivieren und neu aktivieren.';
+    } catch (e) {
+      msg.textContent = 'Test fehlgeschlagen: ' + e.message;
+    }
+  }
+
   // ================================================================ Verdrahtung
+
+  document.getElementById('push-enable-btn').addEventListener('click', enablePush);
+  document.getElementById('push-disable-btn').addEventListener('click', disablePush);
+  document.getElementById('push-test-btn').addEventListener('click', testPush);
+  renderPushStatus();
 
   document.getElementById('flights-import-file').addEventListener('change', async (e) => {
     const f = e.target.files[0];

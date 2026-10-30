@@ -1704,6 +1704,18 @@ window.closeCurrentYear = async function() {
 
 async function saveBaseline() { await DB.set(KEY_BASE, baseline); }
 async function saveTrips() { await DB.set(KEY_TRIPS, trips); }
+
+// Ruft eine Supabase Edge Function mit dem Token des angemeldeten Nutzers auf.
+// Fehler kommen mit der lesbaren Meldung der Funktion (und needsSetup, falls ein API-Zugang fehlt).
+async function callEdge(name, body) {
+  const { data, error } = await supabaseClient.functions.invoke(name, { body });
+  if (!error) return data;
+  let payload = null;
+  try { payload = await error.context.json(); } catch (e) { /* keine JSON-Antwort */ }
+  const err = new Error((payload && payload.error) || error.message || 'Anfrage fehlgeschlagen');
+  err.needsSetup = !!(payload && payload.needsSetup);
+  throw err;
+}
 async function savePromos() { await DB.set(KEY_PROMOS, promos); }
 async function saveUptrip() { await DB.set(KEY_UPTRIP, uptripItems); }
 async function saveFristen() { await DB.set(KEY_FRISTEN, fristen); }

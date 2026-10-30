@@ -583,6 +583,30 @@
       </div>
       <div id="pl-results" style="margin-top:10px;"></div>
       <p class="hint" id="pl-msg" style="margin:8px 0 0;"></p>
+
+      <div class="subcard" id="fs-box" style="margin-top:14px;">
+        <label style="margin-top:0;">🔎 Fahrplan-Suche: echte Verbindungen</label>
+        <p class="hint" style="margin:2px 0 8px;">Sucht mit <b>Von</b>, <b>Nach</b> und <b>Datum</b> von oben die planmäßigen Verbindungen inklusive Umstiege. Nur Flüge der Lufthansa Group (LH, LX, OS, SN, EN, 4Y, AZ …), höchstens 360 Tage im Voraus, <b>ohne Preise und ohne Verfügbarkeit</b>.</p>
+        <label style="display:flex; align-items:center; gap:8px; margin-top:0; font-weight:600; color:var(--text);">
+          <input type="checkbox" id="fs-direct" style="width:auto;"> nur Direktflüge
+        </label>
+        <button type="button" class="btn secondary" id="fs-btn" style="margin-top:8px;">Verbindungen suchen</button>
+        <div id="fs-results" style="margin-top:8px;"></div>
+        <p class="hint" id="fs-msg" style="margin:6px 0 0;"></p>
+        <details id="fs-setup" style="margin-top:10px;">
+          <summary style="cursor:pointer; font-weight:600; color:var(--navy);">🔑 API-Zugang einrichten</summary>
+          <p class="hint" style="margin:6px 0;">Die Suche nutzt die kostenlose Lufthansa Open API. Du brauchst dafür einen eigenen Zugang: Registrierung auf developer.lufthansa.com, dort eine Anwendung anlegen und Client-ID sowie Client-Secret hierher kopieren. Beides wird beim Speichern geprüft und nur auf dem Server abgelegt, nicht im Browser.</p>
+          <p class="hint" id="fs-status" style="margin:0 0 6px;"></p>
+          <div class="row2">
+            <div><label style="margin-top:0;">Client-ID</label><input type="text" id="fs-id" autocomplete="off"></div>
+            <div><label style="margin-top:0;">Client-Secret</label><input type="password" id="fs-secret" autocomplete="off"></div>
+          </div>
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button type="button" class="btn small" id="fs-save-btn">Prüfen &amp; speichern</button>
+            <button type="button" class="btn small secondary" id="fs-del-btn">Zugang löschen</button>
+          </div>
+        </details>
+      </div>
     </div>
 
     <div class="card">
@@ -752,6 +776,18 @@
       <label style="margin-top:14px;">Backup importieren</label>
       <input type="file" id="backup-import-file" accept="application/json,.json">
       <p class="hint" id="backup-msg" style="margin:6px 0 0;"></p>
+    </div>
+
+    <div class="card">
+      <h2>🔔 Benachrichtigungen</h2>
+      <p class="hint" style="margin-top:0;">Erinnert dich per Push, wenn eine Frist oder ein Gutschein bald abläuft (30, 7 und 1 Tag vorher sowie am Ablauftag), auch wenn die App geschlossen ist. Gilt pro Gerät. Auf dem iPhone geht das nur, wenn die App über „Teilen → Zum Home-Bildschirm“ installiert ist (ab iOS 16.4).</p>
+      <p class="hint" id="push-status" style="margin:0 0 8px;"></p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="btn small" id="push-enable-btn">🔔 Auf diesem Gerät aktivieren</button>
+        <button type="button" class="btn small secondary" id="push-test-btn" style="display:none;">Testnachricht senden</button>
+        <button type="button" class="btn small secondary" id="push-disable-btn" style="display:none;">Deaktivieren</button>
+      </div>
+      <p class="hint" id="push-msg" style="margin:6px 0 0;"></p>
     </div>
 
     <div class="card">

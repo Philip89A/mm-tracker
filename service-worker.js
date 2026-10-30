@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mm-tracker-v48';
+const CACHE_NAME = 'mm-tracker-v49';
 const APP_SHELL = [
   './',
   './index.html',
@@ -38,6 +38,30 @@ self.addEventListener('activate', (event) => {
     )
   );
   self.clients.claim();
+});
+
+// Web-Push: Erinnerungen an ablaufende Fristen und Gutscheine (Server: Edge Function deadline-push).
+self.addEventListener('push', (event) => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (e) { d = { body: event.data ? event.data.text() : '' }; }
+  event.waitUntil(self.registration.showNotification(d.title || 'Miles & More Tracker', {
+    body: d.body || '',
+    tag: d.tag || 'mm-tracker',
+    icon: './icons/icon-192.png',
+    badge: './icons/icon-192.png',
+    data: { url: d.url || './' }
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || './';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+      const open = wins.find((w) => w.url.startsWith(self.registration.scope));
+      return open ? open.focus() : self.clients.openWindow(target);
+    })
+  );
 });
 
 self.addEventListener('fetch', (event) => {

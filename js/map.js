@@ -515,8 +515,113 @@
     renderPlanner();
   }
 
+  // ---------- Fahrplan-Suche (Edge Function flight-search, Lufthansa Open API) ----------
+
+  const FS_AIRLINES = { LH: 'Lufthansa', LX: 'SWISS', OS: 'Austrian Airlines', SN: 'Brussels Airlines', EW: 'Eurowings', '4Y': 'Discover Airlines', EN: 'Air Dolomiti', AZ: 'ITA Airways', LO: 'LOT Polish Airlines', CL: 'Lufthansa City Airlines' };
+  let searchJourneys = [];
+
+  function fmtDuration(min) { return min == null ? '' : `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m`; }
+  const timeOf = (dt) => String(dt || '').slice(11, 16);
+
+  function renderJourneys() {
+    const out = document.getElementById('fs-results');
+    const cls = document.getElementById('pl-class').value;
+    const co2 = parseInt(document.getElementById('pl-co2').value) || 0;
+    out.innerHTML = searchJourneys.map((j, i) => {
+      const codes = [j.flights[0].from, ...j.flights.map(f => f.to)];
+      const known = codes.every(c => AIRPORTS[c]);
+      const points = known ? pointsFor(buildLegs(codes, false), cls, co2) : null;
+      const stops = j.flights.length - 1;
+      const lines = j.flights.map(f => `<div class="meta">${esc((f.airline || '') + (f.number || ''))} · ${esc(f.from)} ${esc(timeOf(f.dep))} → ${esc(f.to)} ${esc(timeOf(f.arr))}${f.aircraft ? ' · ' + esc(f.aircraft) : ''}</div>`).join('');
+      return `<div class="trip">
+        <div class="top">
+          <div>
+            <div class="route">${esc(codes.join(' → '))}</div>
+            <div class="meta">${stops === 0 ? 'Direkt' : stops + ' Umstieg' + (stops > 1 ? 'e' : '')}${j.durationMin ? ' · ' + fmtDuration(j.durationMin) + ' gesamt' : ''}</div>
+            ${lines}
+          </div>
+          <div class="pts">${points != null ? `<div class="p">+${points} P/QP</div>` : ''}</div>
+        </div>
+        <div style="margin-top:6px;"><button type="button" class="btn small secondary" data-fs-adopt="${i}">📅 Als geplante Trips übernehmen</button></div>
+      </div>`;
+    }).join('');
+  }
+
+  async function runFlightSearch() {
+    const msg = document.getElementById('fs-msg'), out = document.getElementById('fs-results');
+    const from = resolveAirportInput(document.getElementById('pl-from').value), to = resolveAirportInput(document.getElementById('pl-to').value);
+    const date = document.getElementById('pl-date').value;
+    if (!from || !to || from === to) { msg.textContent = 'Bitte oben Start und Ziel (zwei verschiedene Flughäfen) wählen.'; return; }
+    if (!date) { msg.textContent = 'Bitte oben ein Datum wählen.'; return; }
+    msg.textContent = 'Suche …'; out.innerHTML = ''; searchJourneys = [];
+    try {
+      const r = await callEdge('flight-search', { action: 'search', origin: from, destination: to, date, direct: document.getElementById('fs-direct').checked });
+      searchJourneys = r.journeys || [];
+      msg.textContent = searchJourneys.length ? `${searchJourneys.length} Verbindung${searchJourneys.length === 1 ? '' : 'en'} gefunden. Punkte gelten für die oben gewählte Klasse.` : (r.note || 'Keine Verbindungen gefunden.');
+      renderJourneys();
+    } catch (e) {
+      msg.textContent = e.message;
+      if (e.needsSetup) document.getElementById('fs-setup').open = true;
+    }
+  }
+
+  async function adoptJourney(idx) {
+    const j = searchJourneys[idx], msg = document.getElementById('fs-msg');
+    if (!j) return;
+    const cls = document.getElementById('pl-class').value;
+    const co2 = parseInt(document.getElementById('pl-co2').value) || 0;
+    // Wie im Streckenplaner: jede Teilstrecke ein eigener geplanter Trip, jetzt mit den echten Flugdaten.
+    j.flights.forEach(f => {
+      const range = AIRPORTS[f.from] && AIRPORTS[f.to] ? legRange(airportOf(f.from), airportOf(f.to)) : 'continental';
+      trips.push({
+        id: genId(), date: String(f.dep || '').slice(0, 10) || document.getElementById('pl-date').value,
+        route: `${f.from}–${f.to}`, range, cls, segments: 1, co2,
+        note: 'Fahrplan-Suche', historical: false, planned: true, upgradeFrom: '', upgradeCost: 0,
+        airline: FS_AIRLINES[f.airline] || f.airline || '',
+        flightInfo: [{ flightNo: `${f.airline || ''}${f.number || ''}`, from: f.from, to: f.to, aircraft: f.aircraft || '' }]
+      });
+    });
+    await saveTrips();
+    msg.textContent = `${j.flights.length} geplante${j.flights.length === 1 ? 'r Trip' : ' Trips'} angelegt (Tab Trips).`;
+    render();
+  }
+
+  async function refreshFlightSearchStatus() {
+    const st = document.getElementById('fs-status');
+    try {
+      const r = await callEdge('flight-search', { action: 'status' });
+      st.textContent = r.configured ? '✅ Zugang hinterlegt.' : 'Noch kein Zugang hinterlegt.';
+    } catch (e) { st.textContent = e.message; }
+  }
+
+  function initFlightSearch() {
+    if (!document.getElementById('fs-btn')) return;
+    document.getElementById('fs-btn').addEventListener('click', runFlightSearch);
+    ['pl-class', 'pl-co2'].forEach(id => document.getElementById(id).addEventListener('change', () => { if (searchJourneys.length) renderJourneys(); }));
+    document.getElementById('fs-results').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-fs-adopt]');
+      if (b) adoptJourney(parseInt(b.dataset.fsAdopt));
+    });
+    document.getElementById('fs-setup').addEventListener('toggle', (e) => { if (e.target.open) refreshFlightSearchStatus(); });
+    document.getElementById('fs-save-btn').addEventListener('click', async () => {
+      const st = document.getElementById('fs-status');
+      st.textContent = 'Prüfe Zugangsdaten …';
+      try {
+        await callEdge('flight-search', { action: 'save-credentials', clientId: document.getElementById('fs-id').value, clientSecret: document.getElementById('fs-secret').value });
+        document.getElementById('fs-id').value = ''; document.getElementById('fs-secret').value = '';
+        st.textContent = '✅ Zugang geprüft und gespeichert.';
+      } catch (e) { st.textContent = e.message; }
+    });
+    document.getElementById('fs-del-btn').addEventListener('click', async () => {
+      if (!confirm('Gespeicherten Lufthansa-API-Zugang löschen?')) return;
+      try { await callEdge('flight-search', { action: 'delete-credentials' }); } catch (e) { /* Status unten */ }
+      refreshFlightSearchStatus();
+    });
+  }
+
   initMapInteraction();
   initPlanner();
+  initFlightSearch();
 
   // Teilstrecken eines Trips (Paare aufeinanderfolgender IATA-Codes) mit Gewicht
   // (Segmentzahl / Zahl der Teilstrecken) und Luftlinien-Kilometern.
