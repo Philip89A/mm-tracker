@@ -405,7 +405,60 @@
     }
   }
 
+  // ================================================================ Archivflüge importieren
+
+  // Flighty-Passport-Export (Datei bleibt außerhalb des Repos, siehe Import-Karte).
+  // Übernimmt nur die verfügbaren Flugdaten; Punkte werden bewusst nicht berechnet (noPoints).
+  const IMPORT_CLASS = { E: 'economy', B: 'business', F: 'first', W: 'premium', P: 'premium' };
+
+  function sameLegAlreadyInTool(f) {
+    const day = new Date(f.date).getTime();
+    return trips.some(t => {
+      if (t.flightInfo && t.flightInfo.flightNo === f.flightNo && t.date === f.date) return true;
+      if (Math.abs(new Date(t.date).getTime() - day) > 14 * 86400000) return false;
+      const codes = (String(t.route || '').split(/[\s\-–—→>\/,;]+/)).filter(c => /^[A-Z]{3}$/.test(c));
+      for (let i = 0; i < codes.length - 1; i++) if (codes[i] === f.from && codes[i + 1] === f.to) return true;
+      return false;
+    });
+  }
+
+  async function importFlights(file) {
+    const msg = document.getElementById('flights-import-msg');
+    try {
+      const payload = JSON.parse(await file.text());
+      if (!payload || payload.app !== 'mm-tracker-flights' || !Array.isArray(payload.flights)) throw new Error('Das ist keine Flug-Import-Datei dieses Trackers.');
+      const fresh = [], skipped = [];
+      payload.flights.forEach(f => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(f.date || '') || !/^[A-Z]{3}$/.test(f.from || '') || !/^[A-Z]{3}$/.test(f.to || '')) return;
+        (sameLegAlreadyInTool(f) ? skipped : fresh).push(f);
+      });
+      if (!fresh.length) { msg.textContent = `Nichts zu importieren: alle ${skipped.length} Flüge sind bereits im Tool.`; return; }
+      const fmt = f => `${f.date} ${f.flightNo} ${f.from}–${f.to}`;
+      if (!confirm(`${fresh.length} Flüge als „nur Flugdaten“ (ohne Punkte) importieren?\n\n${fresh.map(fmt).join('\n')}` +
+        (skipped.length ? `\n\nBereits im Tool, werden übersprungen (${skipped.length}):\n${skipped.map(fmt).join('\n')}` : ''))) { msg.textContent = 'Import abgebrochen.'; return; }
+      fresh.forEach(f => {
+        trips.push({
+          id: genId(), date: f.date, route: `${f.from}–${f.to}`, range: 'continental', cls: IMPORT_CLASS[f.cabin] || 'economy',
+          segments: 1, co2: 0, note: 'Archivflug (Flighty-Import)', historical: false, planned: false, airline: f.airline || '',
+          upgradeFrom: '', upgradeCost: 0, qpMode: '', noPoints: true, pointsOverride: 0, cost: 0,
+          flightInfo: { flightNo: f.flightNo, duration: f.duration, aircraft: f.aircraft, registration: f.registration, cabin: f.cabin || '', seat: f.seat || '' }
+        });
+      });
+      await saveTrips();
+      render();
+      msg.textContent = `${fresh.length} Flüge importiert, ${skipped.length} übersprungen. Punkte wurden nicht berechnet.`;
+    } catch (e) {
+      msg.textContent = 'Import fehlgeschlagen: ' + e.message;
+    }
+  }
+
   // ================================================================ Verdrahtung
+
+  document.getElementById('flights-import-file').addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    if (f) await importFlights(f);
+    e.target.value = '';
+  });
 
   document.getElementById('rc-btn').addEventListener('click', runReconcile);
   document.getElementById('rc-date').value = today();
@@ -434,5 +487,5 @@
   });
 
   // Für Tests aus der Konsole.
-  window.MMExtras = { YEAR_TASKS, taskDone, renderBackupStatus, exportBackup, importBackup };
+  window.MMExtras = { YEAR_TASKS, taskDone, renderBackupStatus, exportBackup, importBackup, importFlights };
 })();

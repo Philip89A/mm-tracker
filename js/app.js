@@ -209,6 +209,7 @@ function pointsForSegment(range, cls) {
 // Airlines, deren Points nicht aus der Lufthansa-Group-Tabelle stammen, oder
 // für Kulanz/Korrekturen) hat Vorrang vor der Tabelle.
 function tripPoints(t) {
+  if (t.noPoints) return 0; // "nur Flugdaten": archivierter Flug, Punkte bewusst nicht berechnet
   if (t.pointsOverride > 0) return t.pointsOverride;
   const base = pointsForSegment(t.range, t.cls) * t.segments;
   const bonus = Math.round(base * (t.co2 / 100));
@@ -804,6 +805,8 @@ function renderTrips() {
           ${t.cost > 0 ? `<div class="meta">💶 ${t.cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} €${tripQP(t) > 0 ? ' · ' + (t.cost / tripQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP' : (tripPoints(t) > 0 ? ' · ' + (t.cost / tripPoints(t)).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/Point (keine QP)' : '')}</div>` : ''}
           ${t.historical ? `<div class="meta"><span class="tag mid">🕰️ Historisch — nicht in Gesamtsumme</span></div>` : ''}
           ${t.planned ? `<div class="meta"><span class="tag ok">📅 Geplant</span></div>` : ''}
+          ${t.noPoints ? `<div class="meta"><span class="tag mid">ℹ️ nur Flugdaten — keine Punkte berechnet</span></div>` : ''}
+          ${t.flightInfo ? `<div class="meta">✈️ ${escHtml([t.flightInfo.flightNo, t.flightInfo.aircraft, t.flightInfo.registration, t.flightInfo.seat ? 'Sitz ' + t.flightInfo.seat : '', t.flightInfo.cabin ? 'Kabine ' + t.flightInfo.cabin : '', t.flightInfo.duration].filter(Boolean).join(' · '))}</div>` : ''}
           ${tripUpgradeDeltaQP(t) > 0 ? `<div class="meta">⬆️ Upgrade von ${labelClass(t.upgradeFrom)}${t.upgradeCost > 0 ? ': ' + t.upgradeCost.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' € für +' + tripUpgradeDeltaQP(t) + ' QP (' + (t.upgradeCost / tripUpgradeDeltaQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP)' : ''}</div>` : ''}
           ${t.note ? `<div class="meta">📝 ${escHtml(t.note)}</div>` : ''}
         </div>
@@ -1874,6 +1877,7 @@ window.startEditTrip = function(idx) {
   document.getElementById('t-upgrade-from').value = t.upgradeFrom || '';
   document.getElementById('t-upgrade-cost').value = t.upgradeCost || '';
   document.getElementById('t-qpmode').value = t.qpMode || '';
+  document.getElementById('t-nopoints').checked = !!t.noPoints;
   document.getElementById('t-points-override').value = t.pointsOverride || '';
   document.getElementById('t-cost').value = t.cost || '';
   const linkedMiles = milesLog.filter(mv => mv.sourceTripId === t.id);
@@ -1913,6 +1917,9 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     upgradeFrom: document.getElementById('t-upgrade-from').value,
     upgradeCost: parseFloat(document.getElementById('t-upgrade-cost').value) || 0,
     qpMode: document.getElementById('t-qpmode').value,
+    noPoints: document.getElementById('t-nopoints').checked,
+    // Flugdetails aus dem Archiv-Import bleiben beim Bearbeiten erhalten
+    flightInfo: (trips.find(x => x.id === tripId) || {}).flightInfo,
     pointsOverride: parseInt(document.getElementById('t-points-override').value) || 0,
     cost: parseFloat(document.getElementById('t-cost').value) || 0
   };
