@@ -66,8 +66,15 @@
   <!-- TAB: DASHBOARD -->
   <section id="tab-dashboard" class="section active">
 
-    <div class="card">
-      <h2>📊 Dashboard <span id="loading-tag" class="badge">lädt...</span></h2>
+    <div class="card" data-card="hero">
+      <div class="flex-between">
+        <h2 style="margin:0;">📊 Dashboard <span id="loading-tag" class="badge">lädt...</span></h2>
+        <button type="button" class="btn small secondary" id="dash-customize-btn">⚙️ Anpassen</button>
+      </div>
+      <p class="hint" style="margin:6px 0 8px;">Saison wählen: Points/QP zählen je Kalenderjahr, Meilen jahresübergreifend. So lässt sich auch das laufende Jahr als Senator-Jahr verfolgen, nicht nur das nächste.</p>
+      <div class="goal-switcher" id="season-switch"></div>
+      <p class="hint" id="season-hint" style="margin-top:-6px;"></p>
+      <div id="dash-customize" class="subcard" style="display:none; margin-bottom:12px;"></div>
       <div class="stat-row">
         <div class="stat"><div class="num" id="stat-p">–</div><div class="lbl">Points</div></div>
         <div class="stat"><div class="num" id="stat-q">–</div><div class="lbl">Qualifying Points</div></div>
@@ -75,13 +82,12 @@
       </div>
       <p class="hint" id="planned-delta-display" style="display:none; margin-top:0;"></p>
 
-      <p class="hint" style="margin-top:0;">Jedes Ziel bezieht sich auf sein eigenes Jahr (siehe Jahresangabe je Tab/Zeile) — Points/QP werden pro Jahr zurückgesetzt, nur Meilen zählen jahresübergreifend. "700/800 QP" laufen am aktuellen Jahr, "Senator" fest am Zieljahr.</p>
       <div class="goal-switcher" id="goal-switcher"></div>
       <div id="goal-focus-area"></div>
       <div id="goal-compact-area"></div>
     </div>
 
-    <div class="card">
+    <div class="card" data-card="prognose">
       <h2>🔮 Prognose: Noch benötigte Flüge</h2>
       <p class="hint" style="margin-top:0;">Ausgehend vom Stand inkl. bereits geplanter Flüge &amp; Hotelaufenthalte (heller Balken oben) — wie viele zusätzliche Segmente bis zum jeweils nächsten Ziel noch fehlen. Die beiden Hebel unten sind reine Was-wäre-wenn-Eingaben (nicht gespeichert) — tatsächlich genutzte Umtausche bitte wie gewohnt als Meilen-Bewegung eintragen.</p>
       <div class="row2">
@@ -124,29 +130,14 @@
       <div id="flights-needed-list" style="margin-top:10px;"></div>
     </div>
 
-    <div class="card">
-      <h2>🎯 Quartals-Tracker eVoucher 2026</h2>
-      <p class="hint" id="evoucher-status-line" style="margin-top:0;"></p>
-      <div id="evoucher-quarters"></div>
-      <p class="hint">Alle vier Quartale werden mit dem aktuellen Gesamtstand (bisherige + bereits geplante/eingetragene Flüge) bewertet — Leitgröße ist <b>Qualifying Points</b>, das Ziel für den eVoucher.</p>
+    <div class="card" data-card="tracker">
+      <h2 id="tracker-title">⏱️ Tempo & Quartale</h2>
+      <div id="tracker-status" class="hint" style="margin-top:0;"></div>
+      <div id="tracker-quarters"></div>
+      <p class="hint">Folgt dem Ziel im Zielschalter oben. Die Quartalsziele sind 25/50/75/100 % des Jahresziels; bewertet wird die jeweils bindende Währung (meist Points). Bereits begonnene Quartale zählen nur Erzieltes, spätere Quartale rechnen Geplantes mit ein.</p>
     </div>
 
-    <div class="card">
-      <h2>🏆 Quartals-Tracker Senator 2027</h2>
-      <p class="hint" id="senator-status-line" style="margin-top:0;"></p>
-      <div id="senator-quarters"></div>
-      <form id="senator-ground-form" style="margin-top:14px;">
-        <label>Boden-Punkte 2027 (nicht im Trip-Log erfasst, z.B. Marriott, Kreditkarten-Tausch, Uptrip-Kollektionen)</label>
-        <div class="row2">
-          <div><label style="margin-top:0;">Points</label><input type="number" id="senator-ground-points" min="0" value="0"></div>
-          <div><label style="margin-top:0;">Qualifying Points</label><input type="number" id="senator-ground-qp" min="0" value="0"></div>
-        </div>
-        <button type="submit" class="btn secondary">Boden-Punkte speichern</button>
-      </form>
-      <p class="hint">Leitgröße ist <b>Points</b> (2.000-Ziel) — QP läuft nur als sekundärer Sicherheits-Check mit, da bei Lufthansa-Group-Flügen beide Currencies gleichzeitig vergeben werden.</p>
-    </div>
-
-    <div class="card">
+    <div class="card" data-card="fristen">
       <h2>⏰ Fristen & Ablaufdaten <span class="badge" id="fristen-count">0</span></h2>
       <div id="fristen-list"><div class="empty">Keine Fristen erfasst.</div></div>
       <form id="fristen-form" style="margin-top:10px;">
@@ -160,8 +151,8 @@
       </form>
     </div>
 
-    <div class="card">
-      <h2>⚙️ Basiswerte (manueller Startpunkt)</h2>
+    <div class="card" data-card="basis">
+      <h2>⚙️ Basiswerte & Boden-Punkte</h2>
       <form id="baseline-form">
         <div class="row2">
           <div>
@@ -181,9 +172,18 @@
       </form>
       <p class="hint">Aktualisiere diese Werte, sobald du einen neuen Screenshot aus der App hast — Trips, Uptrip-Einlösungen etc. werden automatisch draufgerechnet.</p>
       <p class="hint" id="base-note-display" style="display:none;"></p>
+      <form id="ground-form" style="margin-top:14px;">
+        <label id="ground-label">Boden-Punkte</label>
+        <div class="row2">
+          <div><label style="margin-top:0;">Points</label><input type="number" id="ground-points" min="0" value="0"></div>
+          <div><label style="margin-top:0;">Qualifying Points</label><input type="number" id="ground-qp" min="0" value="0"></div>
+        </div>
+        <button type="submit" class="btn secondary">Boden-Punkte speichern</button>
+      </form>
+      <p class="hint">Boden-Punkte sind Zusatzpunkte, die weder im Trip-Log noch im Basiswert stecken (z.B. Marriott, Kreditkarten-Tausch, Uptrip). Sie gelten für das oben gewählte Saisonjahr. Die Basiswerte gelten nur fürs laufende Jahr.</p>
     </div>
 
-    <div class="card">
+    <div class="card" data-card="archiv">
       <h2>📚 Jahres-Archiv</h2>
       <p class="hint" style="margin-top:0;">Trips/Hotels/Uptrip-Prämien werden pro Jahr automatisch gezählt — nur die <b>Basiswerte</b> (Points/QP) müssen manuell zurückgesetzt werden, sobald Miles &amp; More deinen Status fürs neue Jahr zurückgesetzt hat. Schließe das Jahr hier ab: der Endstand wird archiviert, Points/QP-Basiswerte gehen auf 0 (Meilen-Basiswert bleibt), der Trip-Log bleibt komplett erhalten.</p>
       <button type="button" class="btn secondary" id="close-year-btn" onclick="closeCurrentYear()">🔒 Jahr abschließen</button>
