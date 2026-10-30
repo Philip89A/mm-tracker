@@ -43,21 +43,35 @@
     return pts;
   }
 
-  // "FRA–FCO–FRA", "FRA-ZRH-SIN", "MUC → JFK" → IATA-Codes. Nur Tokens, die
-  // exakt aus drei GROSSbuchstaben bestehen, zählen (so wird aus "über MUC"
-  // nicht fälschlich BER/VIA gelesen).
-  function parseRoute(route) {
-    const tokens = String(route || '').split(/[\s\-–—→>\/,;]+/).filter(t => /^[A-Z]{3}$/.test(t));
-    return { known: tokens.filter(t => AIRPORTS[t]), unknown: tokens.filter(t => !AIRPORTS[t]) };
-  }
-
   // ---------------------------------------------------------------- Karte
+  //
+  // Feste Weltprojektion (Plate carrée, 1800 x 900 Einheiten); Zoom/Pan
+  // verändern nur das viewBox-Fenster. Länderflächen, Gitter und Bögen werden
+  // bei jedem Datenwechsel neu aufgebaut, Pan/Zoom fasst nur viewBox sowie
+  // die Punkt-/Beschriftungsgrößen an.
+
+  const MAP_W = 1800, MAP_H = 900;
+  const projX = lon => (lon + 180) * (MAP_W / 360);
+  const projY = lat => (90 - lat) * (MAP_H / 180);
+
+  let countryPathsHtml = null;   // einmalig gebaut, Länder ändern sich nicht
+  let mapState = { cx: MAP_W / 2, cy: MAP_H / 2, w: MAP_W, fit: null, dots: [], needsFit: true };
+
+  function countryPaths() {
+    if (countryPathsHtml) return countryPathsHtml;
+    const f = v => v.toFixed(1);
+    countryPathsHtml = Object.entries(WORLD_COUNTRIES).map(([iso, polys]) =>
+      `<path class="rm-c" data-iso="${iso}" d="${polys.map(poly => 'M' + poly.map(([lo, la]) => f(projX(lo)) + ' ' + f(projY(la))).join('L') + 'Z').join('')}"/>`
+    ).join('');
+    return countryPathsHtml;
+  }
 
   function usedLegs(tripList) {
     const legs = new Map();
     const visits = new Map();
     const unknown = new Set();
     const unparsed = [];
+    const countriesFlown = new Set(), countriesPlanned = new Set();
     let flownKm = 0, plannedKm = 0;
 
     tripList.forEach(t => {
@@ -69,6 +83,7 @@
       // Weicht die Segmentzahl von der Zahl der Teilstrecken ab (z.B. zweimal
       // dieselbe Strecke geflogen), wird entsprechend gewichtet.
       const weight = (t.segments || pairs.length) / pairs.length;
+      new Set(known).forEach(c => (t.planned ? countriesPlanned : countriesFlown).add(AIRPORTS[c][3]));
       pairs.forEach(([from, to]) => {
         const a = airportOf(from), b = airportOf(to);
         const key = [from, to].sort().join('-');
@@ -79,73 +94,181 @@
         [from, to].forEach(c => visits.set(c, (visits.get(c) || 0) + weight / 2));
       });
     });
-    return { legs, visits, unknown, unparsed, flownKm, plannedKm };
+    countriesPlanned.forEach(c => { if (countriesFlown.has(c)) countriesPlanned.delete(c); });
+    return { legs, visits, unknown, unparsed, flownKm, plannedKm, countriesFlown, countriesPlanned };
   }
 
-  function fitView(points) {
-    let lonMin = Infinity, lonMax = -Infinity, latMin = Infinity, latMax = -Infinity;
-    points.forEach(([lon, lat]) => {
-      lonMin = Math.min(lonMin, lon); lonMax = Math.max(lonMax, lon);
-      latMin = Math.min(latMin, lat); latMax = Math.max(latMax, lat);
+  function mapSize() {
+    const el = document.getElementById('route-map');
+    const cw = el.clientWidth, ch = el.clientHeight;
+    return cw > 50 && ch > 50 ? { cw, ch } : { cw: 800, ch: 480 };
+  }
+
+  function applyView() {
+    const svg = document.querySelector('#route-map svg');
+    if (!svg) return;
+    const { cw, ch } = mapSize();
+    const w = mapState.w, h = w * ch / cw, unit = w / cw;   // unit = Karteneinheiten pro Bildschirm-Pixel
+    // Mittelpunkt innerhalb der Welt halten
+    mapState.cx = Math.max(0, Math.min(MAP_W, mapState.cx));
+    mapState.cy = Math.max(0, Math.min(MAP_H, mapState.cy));
+    svg.setAttribute('viewBox', `${(mapState.cx - w / 2).toFixed(2)} ${(mapState.cy - h / 2).toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)}`);
+    // Beschriftungen nach Wichtigkeit (Reihenfolge von mapState.dots) vergeben
+    // und ausblenden, wenn sie auf dem Bildschirm eine bereits gesetzte überdecken.
+    const placed = [];
+    const vx = mapState.cx - w / 2, vy = mapState.cy - h / 2;
+    mapState.dots.forEach(d => {
+      d.circle.setAttribute('r', (d.rpx * unit).toFixed(2));
+      d.circle.setAttribute('stroke-width', (1.5 * unit).toFixed(2));
+      if (!d.label) return;
+      const px = (d.cx - vx) / unit + d.rpx + 3, py = (d.cy - vy) / unit - d.rpx - 1;   // Textanfang in Bildschirm-Pixeln
+      const box = { x0: px, x1: px + 30, y0: py - 12, y1: py + 2 };
+      const inView = px > -30 && px < cw && py > 0 && py < ch + 12;
+      const clash = placed.some(b => box.x0 < b.x1 && box.x1 > b.x0 && box.y0 < b.y1 && box.y1 > b.y0);
+      d.label.style.display = inView && !clash ? '' : 'none';
+      if (inView && !clash) placed.push(box);
+      d.label.setAttribute('x', (d.cx + (d.rpx + 3) * unit).toFixed(2));
+      d.label.setAttribute('y', (d.cy - (d.rpx + 1) * unit).toFixed(2));
+      d.label.setAttribute('font-size', (12 * unit).toFixed(2));
+      d.label.setAttribute('stroke-width', (3 * unit).toFixed(2));
     });
-    let lonSpan = Math.max(30, (lonMax - lonMin) * 1.16), latSpan = Math.max(18, (latMax - latMin) * 1.3);
-    const ratio = 1.9;
-    if (lonSpan / latSpan > ratio) latSpan = lonSpan / ratio; else lonSpan = latSpan * ratio;
-    lonSpan = Math.min(360, lonSpan); latSpan = Math.min(170, latSpan);
-    let x0 = (lonMin + lonMax) / 2 - lonSpan / 2, y1 = (latMin + latMax) / 2 + latSpan / 2;
-    x0 = Math.max(-180, Math.min(180 - lonSpan, x0));
-    y1 = Math.max(-85 + latSpan, Math.min(85, y1));
-    return { x0, y1, lonSpan, latSpan };
+  }
+
+  function fitToData() {
+    const { cw, ch } = mapSize();
+    const b = mapState.fit;
+    if (!b) { mapState.cx = MAP_W / 2; mapState.cy = MAP_H / 2; mapState.w = MAP_W; }
+    else {
+      const ratio = cw / ch;
+      const bw = Math.max(b.x1 - b.x0, 1), bh = Math.max(b.y1 - b.y0, 1);
+      mapState.w = Math.min(MAP_W * 1.1, Math.max(bw * 1.25, bh * 1.35 * ratio, 160));
+      mapState.cx = (b.x0 + b.x1) / 2; mapState.cy = (b.y0 + b.y1) / 2;
+    }
+    mapState.needsFit = false;
+    mapState.touched = false;
+    applyView();
+  }
+
+  function zoomBy(factor, anchorX, anchorY) {
+    mapState.touched = true;
+    // anchor in Bildschirmanteilen (0..1); ohne Angabe Mitte
+    const { cw, ch } = mapSize();
+    const ax = anchorX ?? 0.5, ay = anchorY ?? 0.5;
+    const w0 = mapState.w, h0 = w0 * ch / cw;
+    const wx = mapState.cx - w0 / 2 + ax * w0, wy = mapState.cy - h0 / 2 + ay * h0;
+    const w1 = Math.max(60, Math.min(MAP_W * 1.1, w0 / factor)), h1 = w1 * ch / cw;
+    mapState.w = w1;
+    mapState.cx = wx - ax * w1 + w1 / 2;
+    mapState.cy = wy - ay * h1 + h1 / 2;
+    applyView();
+  }
+
+  function initMapInteraction() {
+    const el = document.getElementById('route-map');
+    const pointers = new Map();
+    let pinchDist = null;
+    el.addEventListener('pointerdown', e => {
+      el.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      pinchDist = pointers.size === 2 ? Math.hypot(...[...pointers.values()].reduce((a, p, i) => i ? [a[0] - p.x, a[1] - p.y] : [p.x, p.y], [])) : null;
+    });
+    el.addEventListener('pointermove', e => {
+      const prev = pointers.get(e.pointerId);
+      if (!prev) return;
+      const cur = { x: e.clientX, y: e.clientY };
+      const { cw } = mapSize();
+      if (pointers.size === 1) {
+        const unit = mapState.w / cw;
+        mapState.touched = true;
+        mapState.cx -= (cur.x - prev.x) * unit;
+        mapState.cy -= (cur.y - prev.y) * unit;
+        applyView();
+      } else if (pointers.size === 2) {
+        pointers.set(e.pointerId, cur);
+        const [a, b] = [...pointers.values()];
+        const dist = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinchDist) {
+          const rect = el.getBoundingClientRect();
+          zoomBy(dist / pinchDist, ((a.x + b.x) / 2 - rect.left) / rect.width, ((a.y + b.y) / 2 - rect.top) / rect.height);
+        }
+        pinchDist = dist;
+        return;
+      }
+      pointers.set(e.pointerId, cur);
+    });
+    const end = e => { pointers.delete(e.pointerId); pinchDist = null; };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+    el.addEventListener('wheel', e => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      zoomBy(Math.exp(-e.deltaY * 0.0015), (e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height);
+    }, { passive: false });
+
+    document.getElementById('map-zoom-in').addEventListener('click', () => zoomBy(1.6));
+    document.getElementById('map-zoom-out').addEventListener('click', () => zoomBy(1 / 1.6));
+    document.getElementById('map-zoom-reset').addEventListener('click', fitToData);
+    document.getElementById('map-fullscreen-btn').addEventListener('click', () => {
+      const card = document.getElementById('card-map');
+      const on = card.classList.toggle('map-fullscreen');
+      document.body.style.overflow = on ? 'hidden' : '';
+      document.getElementById('map-fullscreen-btn').textContent = on ? '✕ Schließen' : '⤢ Vollbild';
+      requestAnimationFrame(fitToData);
+    });
+    // Größenänderung (Tab-Wechsel, Drehen, Vollbild): Fenster neu anpassen.
+    // Hat der Nutzer noch nicht gezoomt/geschoben, wird die Erstansicht mit der
+    // echten Containergröße neu berechnet (beim ersten Render ist der Tab oft noch unsichtbar).
+    if (window.ResizeObserver) new ResizeObserver(() => { if (mapState.needsFit || !mapState.touched) fitToData(); else applyView(); }).observe(el);
+  }
+
+  function countryName(iso) {
+    try { return new Intl.DisplayNames(['de'], { type: 'region' }).of(iso) || iso; } catch (e) { return iso; }
+  }
+  function flag(iso) {
+    return String.fromCodePoint(...[...iso].map(c => 127397 + c.charCodeAt(0)));
   }
 
   function renderRouteMap() {
     const el = document.getElementById('route-map');
     if (!el) return;
 
-    const yearSel = document.getElementById('map-filter-year');
-    const statusSel = document.getElementById('map-filter-status');
-    const prevYear = yearSel.value;
-    const years = [...new Set(trips.map(t => (t.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
-    yearSel.innerHTML = '<option value="">Alle</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
-    if (years.includes(prevYear)) yearSel.value = prevYear;
-
-    const list = trips
-      .filter(t => !yearSel.value || (t.date || '').startsWith(yearSel.value))
-      .filter(t => !statusSel.value || (statusSel.value === 'planned' ? t.planned : !t.planned));
-
+    const list = getFilteredTrips();   // gleiche Filter wie der Trip-Log (siehe app.js)
     const statsEl = document.getElementById('route-map-stats');
     const unkEl = document.getElementById('route-map-unknown');
-    const { legs, visits, unknown, unparsed, flownKm, plannedKm } = usedLegs(list);
+    const chipsEl = document.getElementById('route-map-countries');
+    const { legs, visits, unknown, unparsed, flownKm, plannedKm, countriesFlown, countriesPlanned } = usedLegs(list);
 
     const notes = [];
-    if (unknown.size) notes.push(`Unbekannte Flughafencodes: ${[...unknown].map(esc).join(', ')}`);
-    if (unparsed.length) notes.push(`Ohne erkennbare Strecke (kein IATA-Code in Großbuchstaben): ${[...new Set(unparsed)].slice(0, 6).map(esc).join(' · ')}`);
+    if (unknown.size) notes.push(`Unbekannte Flughafencodes: ${[...unknown].map(escHtml).join(', ')}`);
+    if (unparsed.length) notes.push(`Ohne erkennbare Strecke (kein IATA-Code in Großbuchstaben): ${[...new Set(unparsed)].slice(0, 6).map(escHtml).join(' · ')}`);
     unkEl.style.display = notes.length ? 'block' : 'none';
     unkEl.innerHTML = notes.map(n => '⚠️ ' + n).join('<br>');
 
     if (legs.size === 0) {
-      el.innerHTML = '<div class="empty">Noch keine darstellbaren Strecken — trage im Trip-Log Strecken wie „FRA–FCO–FRA“ (IATA-Codes) ein.</div>';
+      el.innerHTML = '<div class="empty" style="margin:20px;">Noch keine darstellbaren Strecken — trage im Trip-Log Strecken wie „FRA–FCO–FRA“ (IATA-Codes) ein.</div>';
       statsEl.textContent = '';
+      chipsEl.innerHTML = '';
+      mapState.dots = [];
       return;
     }
 
-    // Großkreis-Bögen vorab berechnen, damit die Ansicht auch ihre Ausbuchtung umfasst.
     const arcs = [...legs.values()].map(leg => {
       const n = Math.max(6, Math.min(60, Math.round(leg.km / 150)));
       return { leg, pts: greatCirclePoints(leg.a, leg.b, n) };
     });
-    const allPts = arcs.flatMap(a => a.pts);
-    const view = fitView(allPts);
-    const W = 1000, s = W / view.lonSpan, H = Math.round(view.latSpan * s);
-    const X = lon => ((lon - view.x0) * s);
-    const Y = lat => ((view.y1 - lat) * s);
+
+    // Sichtfenster der Daten (in Karteneinheiten) für „zurücksetzen“/Erstansicht
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    arcs.forEach(({ pts }) => pts.forEach(([lo, la]) => {
+      x0 = Math.min(x0, projX(lo)); x1 = Math.max(x1, projX(lo));
+      y0 = Math.min(y0, projY(la)); y1 = Math.max(y1, projY(la));
+    }));
+    mapState.fit = { x0, x1, y0, y1 };
+
     const f = v => v.toFixed(1);
-
-    const land = WORLD_LAND.map(poly => 'M' + poly.map(([lo, la]) => f(X(lo)) + ' ' + f(Y(la))).join('L') + 'Z').join('');
-
     let grid = '';
-    for (let lo = Math.ceil(view.x0 / 30) * 30; lo <= view.x0 + view.lonSpan; lo += 30) grid += `<line x1="${f(X(lo))}" y1="0" x2="${f(X(lo))}" y2="${H}"/>`;
-    for (let la = Math.ceil((view.y1 - view.latSpan) / 30) * 30; la <= view.y1; la += 30) grid += `<line x1="0" y1="${f(Y(la))}" x2="${W}" y2="${f(Y(la))}"/>`;
+    for (let lo = -150; lo <= 180; lo += 30) grid += `<line x1="${f(projX(lo))}" y1="0" x2="${f(projX(lo))}" y2="${MAP_H}"/>`;
+    for (let la = -60; la <= 90; la += 30) grid += `<line x1="0" y1="${f(projY(la))}" x2="${MAP_W}" y2="${f(projY(la))}"/>`;
 
     const lines = arcs.map(({ leg, pts }) => {
       const segs = [[]];
@@ -153,40 +276,63 @@
         if (i > 0 && Math.abs(p[0] - pts[i - 1][0]) > 180) segs.push([]);
         segs[segs.length - 1].push(p);
       });
-      const d = segs.filter(sg => sg.length > 1).map(sg => 'M' + sg.map(([lo, la]) => f(X(lo)) + ' ' + f(Y(la))).join('L')).join('');
+      const d = segs.filter(sg => sg.length > 1).map(sg => 'M' + sg.map(([lo, la]) => f(projX(lo)) + ' ' + f(projY(la))).join('L')).join('');
       const total = leg.flown + leg.planned;
-      const w = Math.min(5, 1.2 + 0.9 * Math.log2(1 + total));
-      const title = `<title>${esc(leg.a.code)} ↔ ${esc(leg.b.code)} · ${Math.round(leg.km).toLocaleString('de-DE')} km · ${leg.flown ? Math.round(leg.flown) + '× geflogen' : ''}${leg.flown && leg.planned ? ', ' : ''}${leg.planned ? Math.round(leg.planned) + '× geplant' : ''}</title>`;
-      let out = '';
-      if (leg.flown > 0) out += `<path d="${d}" class="rm-leg flown" style="stroke-width:${w.toFixed(1)}">${title}</path>`;
-      if (leg.planned > 0) out += `<path d="${d}" class="rm-leg planned" style="stroke-width:${(leg.flown > 0 ? 1.4 : w).toFixed(1)}">${leg.flown > 0 ? '' : title}</path>`;
+      const w = Math.min(5, 1.6 + 0.9 * Math.log2(1 + total));
+      const title = `<title>${escHtml(leg.a.code)} ↔ ${escHtml(leg.b.code)} · ${Math.round(leg.km).toLocaleString('de-DE')} km · ${leg.flown ? Math.round(leg.flown) + '× geflogen' : ''}${leg.flown && leg.planned ? ', ' : ''}${leg.planned ? Math.round(leg.planned) + '× geplant' : ''}</title>`;
+      let out = `<path d="${d}" class="rm-halo" style="stroke-width:${(w + 2.2).toFixed(1)}px"/>`;
+      if (leg.flown > 0) out += `<path d="${d}" class="rm-leg flown" style="stroke-width:${w.toFixed(1)}px">${title}</path>`;
+      if (leg.planned > 0) out += `<path d="${d}" class="rm-leg planned" style="stroke-width:${(leg.flown > 0 ? 1.6 : w).toFixed(1)}px">${leg.flown > 0 ? '' : title}</path>`;
       return out;
     }).join('');
 
     const ranked = [...visits.entries()].sort((a, b) => b[1] - a[1]);
     const labelled = new Set(ranked.slice(0, 25).map(r => r[0]));
-    const dots = ranked.map(([code, v]) => {
+    const dotsHtml = ranked.map(([code, v]) => {
       const a = airportOf(code);
-      const r = 3 + Math.min(6, Math.sqrt(v));
-      return `<circle cx="${f(X(a.lon))}" cy="${f(Y(a.lat))}" r="${r.toFixed(1)}" class="rm-dot"><title>${esc(code)} · ${esc(a.city)} · ${Math.round(v)}× besucht</title></circle>` +
-        (labelled.has(code) ? `<text x="${f(X(a.lon) + r + 2)}" y="${f(Y(a.lat) - r)}" class="rm-label">${esc(code)}</text>` : '');
+      const micro = !WORLD_COUNTRIES[a.country];   // Land ohne Fläche im 110m-Datensatz
+      return `<circle class="rm-dot${micro ? ' micro' : ''}" data-code="${code}" cx="${f(projX(a.lon))}" cy="${f(projY(a.lat))}"><title>${escHtml(code)} · ${escHtml(a.city)} (${escHtml(countryName(a.country))}) · ${Math.round(v)}× besucht</title></circle>` +
+        (labelled.has(code) ? `<text class="rm-label" data-code="${code}">${escHtml(code)}</text>` : '');
     }).join('');
 
-    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Streckenkarte">
-      <rect width="${W}" height="${H}" class="rm-sea"/>
+    el.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Streckenkarte" preserveAspectRatio="xMidYMid meet">
+      <rect x="-3000" y="-3000" width="${MAP_W + 6000}" height="${MAP_H + 6000}" class="rm-sea"/>
       <g class="rm-grid">${grid}</g>
-      <path d="${land}" class="rm-land"/>
+      <g>${countryPaths()}</g>
       <g fill="none">${lines}</g>
-      ${dots}
+      ${dotsHtml}
     </svg>`;
+
+    const svg = el.querySelector('svg');
+    countriesFlown.forEach(iso => { const p = svg.querySelector(`.rm-c[data-iso="${iso}"]`); if (p) p.classList.add('visited'); });
+    countriesPlanned.forEach(iso => { const p = svg.querySelector(`.rm-c[data-iso="${iso}"]`); if (p) p.classList.add('planned'); });
+
+    mapState.dots = ranked.map(([code, v]) => {
+      const a = airportOf(code);
+      const circle = svg.querySelector(`circle[data-code="${code}"]`);
+      const micro = !WORLD_COUNTRIES[a.country];
+      return {
+        circle, label: svg.querySelector(`text[data-code="${code}"]`),
+        cx: projX(a.lon), cy: projY(a.lat), rpx: (micro ? 6 : 3.5) + Math.min(5, Math.sqrt(v))
+      };
+    });
+    mapState.needsFit = true;
+    fitToData();
 
     const km = Math.round(flownKm), earth = flownKm / 40075;
     const parts = [`${legs.size} Strecke${legs.size === 1 ? '' : 'n'}`, `${visits.size} Flughäfen`];
+    if (countriesFlown.size) parts.push(`${countriesFlown.size === 1 ? '1 Land' : countriesFlown.size + ' Länder'} besucht`);
     if (flownKm > 0) parts.push(`${km.toLocaleString('de-DE')} km geflogen (${earth.toLocaleString('de-DE', { maximumFractionDigits: 1 })}× um die Erde)`);
     if (plannedKm > 0) parts.push(`${Math.round(plannedKm).toLocaleString('de-DE')} km geplant`);
     statsEl.textContent = parts.join(' · ') + ' — Luftlinie (Großkreis) je Teilstrecke, nicht die real geflogene Distanz.';
+
+    const chip = (iso, cls) => `<span class="chip ${cls}">${flag(iso)} ${escHtml(countryName(iso))}</span>`;
+    chipsEl.innerHTML =
+      [...countriesFlown].sort((a, b) => countryName(a).localeCompare(countryName(b), 'de')).map(i => chip(i, 'visited')).join('') +
+      [...countriesPlanned].sort((a, b) => countryName(a).localeCompare(countryName(b), 'de')).map(i => chip(i, 'planned')).join('');
   }
   window.renderRouteMap = renderRouteMap;
+
 
   // ---------------------------------------------------------- Streckenplaner
 
@@ -369,8 +515,7 @@
     renderPlanner();
   }
 
-  document.getElementById('map-filter-year').addEventListener('change', renderRouteMap);
-  document.getElementById('map-filter-status').addEventListener('change', renderRouteMap);
+  initMapInteraction();
   initPlanner();
 
   // Für Tests/Debugging aus der Konsole erreichbar.

@@ -617,30 +617,72 @@ function renderSenatorTracker() {
   }).join('');
 }
 
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// "FRA–FCO–FRA", "FRA-ZRH-SIN", "MUC → JFK" -> IATA-Codes. Nur Tokens, die exakt
+// aus drei GROSSbuchstaben bestehen, zählen (so wird aus "über MUC" nicht
+// fälschlich BER/VIA gelesen).
+function parseRoute(route) {
+  const tokens = String(route || '').split(/[\s\-–—→>\/,;]+/).filter(t => /^[A-Z]{3}$/.test(t));
+  return { known: tokens.filter(t => AIRPORTS[t]), unknown: tokens.filter(t => !AIRPORTS[t]) };
+}
+
+function tripAirportCodes(t) { return parseRoute(t.route).known; }
+
+// Filter-Leiste über der Karte (tf-*): gilt gemeinsam für Karte und Trip-Log.
+function populateTripFilters() {
+  const fill = (id, html) => {
+    const sel = document.getElementById(id);
+    const prev = sel.value;
+    sel.innerHTML = html;
+    if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+  };
+  const years = [...new Set(trips.map(t => (t.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
+  fill('tf-year', '<option value="">Alle</option>' + years.map(y => `<option value="${y}">${y}</option>`).join(''));
+  const airlines = [...new Set(trips.map(t => (t.airline || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
+  fill('tf-airline', '<option value="">Alle</option>' + airlines.map(a => `<option value="${escHtml(a)}">${escHtml(a)}</option>`).join('') +
+    (trips.some(t => !(t.airline || '').trim()) ? '<option value="__none">(ohne Angabe)</option>' : ''));
+  const airports = [...new Set(trips.flatMap(tripAirportCodes))].sort();
+  fill('tf-airport', '<option value="">Alle</option>' + airports.map(c => `<option value="${c}">${c} · ${escHtml(AIRPORTS[c][2])}</option>`).join(''));
+}
+
+function getFilteredTrips() {
+  const y = document.getElementById('tf-year').value;
+  const st = document.getElementById('tf-status').value;
+  const al = document.getElementById('tf-airline').value;
+  const ap = document.getElementById('tf-airport').value;
+  return trips.filter(t =>
+    (!y || (t.date || '').startsWith(y)) &&
+    (!st || (st === 'planned' ? !!t.planned : !t.planned)) &&
+    (!al || (al === '__none' ? !(t.airline || '').trim() : (t.airline || '').trim() === al)) &&
+    (!ap || tripAirportCodes(t).includes(ap))
+  );
+}
+
 function renderTrips() {
   const list = document.getElementById('trip-list');
   document.getElementById('trip-count').textContent = trips.length;
-
-  const yearSelect = document.getElementById('trip-filter-year');
-  const prevYear = yearSelect.value;
-  const usedYears = [...new Set(trips.map(t => (t.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
-  yearSelect.innerHTML = '<option value="">Alle</option>' + usedYears.map(y => `<option value="${y}">${y}</option>`).join('');
-  if (usedYears.includes(prevYear)) yearSelect.value = prevYear;
-  const filterYear = yearSelect.value;
+  populateTripFilters();
 
   const upgSummaryEl = document.getElementById('trip-upgrade-summary');
+  const noteEl = document.getElementById('trip-filter-note');
   upgSummaryEl.style.display = 'none';
+  noteEl.textContent = '';
 
   if (trips.length === 0) {
     list.innerHTML = '<div class="empty">Noch keine Trips erfasst.</div>';
     return;
   }
-  const filtered = filterYear ? trips.filter(t => (t.date || '').startsWith(filterYear)) : trips;
+  const filtered = getFilteredTrips();
+  if (filtered.length !== trips.length) noteEl.textContent = `${filtered.length} von ${trips.length} Trips (Filter über der Karte).`;
   if (filtered.length === 0) {
-    list.innerHTML = '<div class="empty">Keine Trips für dieses Jahr.</div>';
+    list.innerHTML = '<div class="empty">Keine Trips für diesen Filter.</div>';
     return;
   }
 
+  const filterYear = document.getElementById('tf-year').value;
   const upgraded = filtered.filter(t => t.upgradeCost > 0 && tripUpgradeDeltaQP(t) > 0);
   if (upgraded.length > 0) {
     const cost = upgraded.reduce((s, t) => s + t.upgradeCost, 0);
@@ -648,19 +690,50 @@ function renderTrips() {
     upgSummaryEl.textContent = `⬆️ Upgrades${filterYear ? ' ' + filterYear : ''}: ${upgraded.length} Flug${upgraded.length === 1 ? '' : 'e'}, ${cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} € Aufpreis für +${dq} QP (Ø ${(cost / dq).toLocaleString('de-DE', {minimumFractionDigits: 2})} €/QP) — die Punkte stecken bereits in den Flügen unten.`;
     upgSummaryEl.style.display = 'block';
   }
-  const sorted = [...filtered].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  // Sortierung; Jahr/Airline/Flughafen gruppieren zusätzlich mit Zwischenüberschrift.
+  const byDateDesc = (a, b) => new Date(b.date) - new Date(a.date);
+  const sortKey = document.getElementById('trip-sort').value;
+  const groupers = {
+    year: { key: t => (t.date || '').slice(0, 4) || '–', cmp: (a, b) => b.localeCompare(a), label: k => k },
+    airline: { key: t => (t.airline || '').trim() || '– ohne Angabe', cmp: (a, b) => (a.startsWith('–') - b.startsWith('–')) || a.localeCompare(b, 'de'), label: k => k },
+    airport: { key: t => tripAirportCodes(t)[0] || '–', cmp: (a, b) => (a === '–') - (b === '–') || a.localeCompare(b), label: k => AIRPORTS[k] ? `${k} · ${AIRPORTS[k][2]}` : 'ohne erkennbaren Flughafen' }
+  };
+  const grouper = groupers[sortKey];
+  let sorted;
+  if (grouper) sorted = [...filtered].sort((a, b) => grouper.cmp(grouper.key(a), grouper.key(b)) || byDateDesc(a, b));
+  else if (sortKey === 'date_asc') sorted = [...filtered].sort((a, b) => -byDateDesc(a, b));
+  else if (sortKey === 'points') sorted = [...filtered].sort((a, b) => tripPoints(b) - tripPoints(a) || byDateDesc(a, b));
+  else sorted = [...filtered].sort(byDateDesc);
+
+  const groupStats = {};
+  if (grouper) sorted.forEach(t => {
+    const g = (groupStats[grouper.key(t)] = groupStats[grouper.key(t)] || { n: 0, pts: 0 });
+    g.n += 1; g.pts += t.historical ? 0 : tripPoints(t);
+  });
+
+  let lastGroup = null;
   list.innerHTML = sorted.map(t => {
     const total = tripPoints(t);
     const idx = trips.indexOf(t);
-    return `<div class="trip">
+    let head = '';
+    if (grouper) {
+      const gk = grouper.key(t);
+      if (gk !== lastGroup) {
+        lastGroup = gk;
+        const gs = groupStats[gk];
+        head = `<div class="group-head"><span>${escHtml(grouper.label(gk))}</span><span>${gs.n} Trip${gs.n === 1 ? '' : 's'} · +${gs.pts} P/QP</span></div>`;
+      }
+    }
+    return head + `<div class="trip">
       <div class="top">
         <div>
-          <div class="route">${t.route}</div>
-          <div class="meta">${t.date} · ${t.range === 'continental' ? 'Kontinental' : 'Interkont.'} · ${labelClass(t.cls)} · ${t.segments} Segm.${t.co2 > 0 ? ' · CO₂ +' + t.co2 + '%' : ''}</div>
+          <div class="route">${escHtml(t.route)}</div>
+          <div class="meta">${t.date} · ${t.range === 'continental' ? 'Kontinental' : 'Interkont.'} · ${labelClass(t.cls)} · ${t.segments} Segm.${t.co2 > 0 ? ' · CO₂ +' + t.co2 + '%' : ''}${t.airline ? ' · ' + escHtml(t.airline) : ''}</div>
           ${t.historical ? `<div class="meta"><span class="tag mid">🕰️ Historisch — nicht in Gesamtsumme</span></div>` : ''}
           ${t.planned ? `<div class="meta"><span class="tag ok">📅 Geplant</span></div>` : ''}
           ${tripUpgradeDeltaQP(t) > 0 ? `<div class="meta">⬆️ Upgrade von ${labelClass(t.upgradeFrom)}${t.upgradeCost > 0 ? ': ' + t.upgradeCost.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' € für +' + tripUpgradeDeltaQP(t) + ' QP (' + (t.upgradeCost / tripUpgradeDeltaQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP)' : ''}</div>` : ''}
-          ${t.note ? `<div class="meta">📝 ${t.note}</div>` : ''}
+          ${t.note ? `<div class="meta">📝 ${escHtml(t.note)}</div>` : ''}
         </div>
         <div class="pts">
           <div class="p" style="${t.historical ? 'opacity:0.5; text-decoration:line-through;' : (t.planned ? 'opacity:0.6;' : '')}">+${total} P/QP</div>
@@ -1095,11 +1168,12 @@ function csvEscape(v) {
 }
 
 window.exportTripsCsv = function() {
-  const header = ['Datum', 'Strecke', 'Reichweite', 'Klasse', 'Segmente', 'CO2-Bonus %', 'Points/QP', 'Upgrade von', 'Upgrade-Kosten €', 'Zusatz-QP durch Upgrade', 'Historisch', 'Geplant', 'Notiz'];
+  const header = ['Datum', 'Strecke', 'Airline', 'Reichweite', 'Klasse', 'Segmente', 'CO2-Bonus %', 'Points/QP', 'Upgrade von', 'Upgrade-Kosten €', 'Zusatz-QP durch Upgrade', 'Historisch', 'Geplant', 'Notiz'];
   const sorted = [...trips].sort((a, b) => new Date(a.date) - new Date(b.date));
   const rows = sorted.map(t => [
     t.date,
     t.route,
+    t.airline || '',
     t.range === 'continental' ? 'Kontinental' : 'Interkontinental',
     labelClass(t.cls),
     t.segments,
@@ -1615,6 +1689,7 @@ window.startEditTrip = function(idx) {
   document.getElementById('t-note').value = t.note || '';
   document.getElementById('t-historical').checked = !!t.historical;
   document.getElementById('t-planned').checked = !!t.planned;
+  document.getElementById('t-airline').value = t.airline || '';
   document.getElementById('t-upgrade-from').value = t.upgradeFrom || '';
   document.getElementById('t-upgrade-cost').value = t.upgradeCost || '';
   const linkedMiles = milesLog.filter(mv => mv.sourceTripId === t.id);
@@ -1650,6 +1725,7 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     note: document.getElementById('t-note').value,
     historical: document.getElementById('t-historical').checked,
     planned: document.getElementById('t-planned').checked,
+    airline: document.getElementById('t-airline').value.trim(),
     upgradeFrom: document.getElementById('t-upgrade-from').value,
     upgradeCost: parseFloat(document.getElementById('t-upgrade-cost').value) || 0
   };
@@ -1774,7 +1850,11 @@ document.getElementById('mi-category').addEventListener('change', () => {
 
 document.getElementById('mi-filter-category').addEventListener('change', renderMiles);
 document.getElementById('mi-filter-year').addEventListener('change', renderMiles);
-document.getElementById('trip-filter-year').addEventListener('change', renderTrips);
+['tf-year', 'tf-status', 'tf-airline', 'tf-airport'].forEach(id => document.getElementById(id).addEventListener('change', () => {
+  renderTrips();
+  if (typeof renderRouteMap === 'function') renderRouteMap();
+}));
+document.getElementById('trip-sort').addEventListener('change', renderTrips);
 
 document.getElementById('calc-range').addEventListener('change', (e) => { calcRange = e.target.value; renderFlightsNeeded(); });
 document.getElementById('calc-class').addEventListener('change', (e) => { calcClass = e.target.value; renderFlightsNeeded(); });

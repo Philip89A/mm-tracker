@@ -338,15 +338,33 @@ nav.tabbar button.active { color: var(--navy); font-weight: 700; }
 .section.active { display: block; }
 
 /* Streckenkarte */
-.route-map svg { width: 100%; height: auto; display: block; border-radius: 10px; }
-.rm-sea { fill: #e6f0fa; }
-.rm-grid line { stroke: #c9d9ea; stroke-width: 0.8; }
-.rm-land { fill: #f4f1e8; stroke: #c7c1ae; stroke-width: 0.6; }
-.rm-leg { stroke-linecap: round; opacity: 0.85; }
-.rm-leg.flown { stroke: var(--navy2); }
-.rm-leg.planned { stroke: var(--gold); stroke-dasharray: 7 5; }
-.rm-dot { fill: var(--navy); stroke: #fff; stroke-width: 1.5; }
-.rm-label { font-size: 14px; font-weight: 700; fill: var(--navy); paint-order: stroke; stroke: #fff; stroke-width: 3px; }
+.map-wrap { position: relative; }
+.route-map { position: relative; width: 100%; height: 62vh; min-height: 320px; max-height: 720px; border-radius: 10px; overflow: hidden; background: #d9e8f7; touch-action: none; cursor: grab; }
+.route-map:active { cursor: grabbing; }
+.route-map svg { width: 100%; height: 100%; display: block; }
+.rm-sea { fill: #d9e8f7; }
+.rm-grid line { stroke: #bcd3ea; stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+.rm-c { fill: #f1efe6; stroke: #bdb7a3; stroke-width: 0.7; vector-effect: non-scaling-stroke; }
+.rm-c.planned { fill: #9db9e0; stroke: #7f9fcf; }
+.rm-c.visited { fill: #1f4e8c; stroke: #16396a; }
+.rm-halo { stroke: #fff; opacity: 0.75; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.rm-leg { stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.rm-leg.flown { stroke: #ff922b; }
+.rm-leg.planned { stroke: #ffd43b; stroke-dasharray: 7 5; }
+.rm-dot { fill: #fff; stroke: #0b2347; }
+.rm-dot.micro { fill: #1f4e8c; stroke: #fff; }
+.rm-label { font-weight: 700; fill: #0b2347; paint-order: stroke; stroke: #fff; stroke-linejoin: round; pointer-events: none; }
+.map-controls { position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column; gap: 6px; z-index: 2; }
+.map-controls button { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--gray-border); background: #fff; color: var(--navy); font-size: 18px; font-weight: 700; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
+.card.map-fullscreen { position: fixed; inset: 0; z-index: 1000; margin: 0; border-radius: 0; overflow-y: auto; background: #fff; }
+.card.map-fullscreen .route-map { height: 68vh; max-height: none; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip { font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 20px; }
+.chip.visited { background: #1f4e8c; color: #fff; }
+.chip.planned { background: #dbe6f6; color: #1f4e8c; }
+
+/* Trip-Log: Gruppenüberschriften */
+.group-head { display: flex; justify-content: space-between; gap: 8px; margin-top: 14px; padding: 6px 10px; border-radius: 8px; background: var(--navy); color: #fff; font-size: 12px; font-weight: 700; }
 
 /* Streckenplaner: Flughafen-Vorschläge */
 .sug { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
