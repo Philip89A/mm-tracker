@@ -430,15 +430,30 @@
   // Übernimmt nur die verfügbaren Flugdaten; Punkte werden bewusst nicht berechnet (noPoints).
   const IMPORT_CLASS = { E: 'economy', B: 'business', F: 'first', W: 'premium', P: 'premium' };
 
-  function sameLegAlreadyInTool(f) {
+  const routeCodes = (t) => String(t.route || '').split(/[\s\-–—→>\/,;]+/).filter(c => /^[A-Z]{3}$/.test(c));
+  const legInfoFor = (f) => ({ flightNo: f.flightNo, from: f.from, to: f.to, date: f.date, duration: f.duration, aircraft: f.aircraft, registration: f.registration, cabin: f.cabin || '', seat: f.seat || '' });
+
+  // Sucht den Trip, zu dem ein Flug gehört (gleiche Teilstrecke, höchstens 14 Tage Abstand).
+  // 'enrich': Trip ist da, aber die Teilstrecke hat noch keine Flugdetails -> Details ergänzen.
+  // 'skip': Teilstrecke hat schon Details. 'fresh': Flug ist noch nicht im Tool.
+  function matchImportedFlight(f) {
     const day = new Date(f.date).getTime();
-    return trips.some(t => {
-      if (t.date === f.date && tripFlightInfos(t).some(x => x.flightNo === f.flightNo)) return true;
+    const cands = trips.filter(t => {
       if (Math.abs(new Date(t.date).getTime() - day) > 14 * 86400000) return false;
-      const codes = (String(t.route || '').split(/[\s\-–—→>\/,;]+/)).filter(c => /^[A-Z]{3}$/.test(c));
-      for (let i = 0; i < codes.length - 1; i++) if (codes[i] === f.from && codes[i + 1] === f.to) return true;
-      return false;
-    });
+      const c = routeCodes(t);
+      return c.some((code, i) => code === f.from && c[i + 1] === f.to);
+    }).sort((a, b) => Math.abs(new Date(a.date) - day) - Math.abs(new Date(b.date) - day));
+    if (!cands.length) return { status: 'fresh' };
+    const filled = (t) => tripFlightInfos(t).some(x => x.from === f.from && x.to === f.to && (!x.date || x.date === f.date));
+    const open = cands.find(t => !filled(t));
+    return open ? { status: 'enrich', trip: open } : { status: 'skip', trip: cands[0] };
+  }
+
+  function enrichTrip(t, f) {
+    const codes = routeCodes(t);
+    const legIdx = (x) => codes.findIndex((c, i) => c === x.from && codes[i + 1] === x.to);
+    t.flightInfo = [...tripFlightInfos(t), legInfoFor(f)].sort((a, b) => legIdx(a) - legIdx(b));
+    if (!(t.airline || '').trim() && f.airline) t.airline = f.airline;
   }
 
   async function importFlights(file) {
@@ -446,26 +461,31 @@
     try {
       const payload = JSON.parse(await file.text());
       if (!payload || payload.app !== 'mm-tracker-flights' || !Array.isArray(payload.flights)) throw new Error('Das ist keine Flug-Import-Datei dieses Trackers.');
-      const fresh = [], skipped = [];
+      const fresh = [], enrich = [], skipped = [];
       payload.flights.forEach(f => {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(f.date || '') || !/^[A-Z]{3}$/.test(f.from || '') || !/^[A-Z]{3}$/.test(f.to || '')) return;
-        (sameLegAlreadyInTool(f) ? skipped : fresh).push(f);
+        const m = matchImportedFlight(f);
+        (m.status === 'fresh' ? fresh : m.status === 'enrich' ? enrich : skipped).push(m.status === 'enrich' ? { f, trip: m.trip } : f);
       });
-      if (!fresh.length) { msg.textContent = `Nichts zu importieren: alle ${skipped.length} Flüge sind bereits im Tool.`; return; }
+      if (!fresh.length && !enrich.length) { msg.textContent = `Nichts zu tun: alle ${skipped.length} Flüge sind bereits mit Details im Tool.`; return; }
       const fmt = f => `${f.date} ${f.flightNo} ${f.from}–${f.to}`;
-      if (!confirm(`${fresh.length} Flüge als „nur Flugdaten“ (ohne Punkte) importieren?\n\n${fresh.map(fmt).join('\n')}` +
-        (skipped.length ? `\n\nBereits im Tool, werden übersprungen (${skipped.length}):\n${skipped.map(fmt).join('\n')}` : ''))) { msg.textContent = 'Import abgebrochen.'; return; }
+      const parts = [];
+      if (enrich.length) parts.push(`${enrich.length} Flüge sind schon als Trip im Tool — nur Flugdetails (Flugnummer, Flugzeug, Kennzeichen, Sitz) werden ergänzt, Punkte und Klasse bleiben unverändert:\n${enrich.map(e => fmt(e.f)).join('\n')}`);
+      if (fresh.length) parts.push(`${fresh.length} Flüge sind neu und werden als „nur Flugdaten“ (ohne Punkte) angelegt:\n${fresh.map(fmt).join('\n')}`);
+      if (skipped.length) parts.push(`${skipped.length} Flüge haben schon Details und werden übersprungen.`);
+      if (!confirm(parts.join('\n\n'))) { msg.textContent = 'Import abgebrochen.'; return; }
+      enrich.forEach(e => enrichTrip(e.trip, e.f));
       fresh.forEach(f => {
         trips.push({
           id: genId(), date: f.date, route: `${f.from}–${f.to}`, range: 'continental', cls: IMPORT_CLASS[f.cabin] || 'economy',
           segments: 1, co2: 0, note: 'Archivflug (Flighty-Import)', historical: false, planned: false, airline: f.airline || '',
           upgradeFrom: '', upgradeCost: 0, qpMode: '', noPoints: true, pointsOverride: 0, cost: 0,
-          flightInfo: [{ flightNo: f.flightNo, from: f.from, to: f.to, duration: f.duration, aircraft: f.aircraft, registration: f.registration, cabin: f.cabin || '', seat: f.seat || '' }]
+          flightInfo: [legInfoFor(f)]
         });
       });
       await saveTrips();
       render();
-      msg.textContent = `${fresh.length} Flüge importiert, ${skipped.length} übersprungen. Punkte wurden nicht berechnet.`;
+      msg.textContent = `${enrich.length} Trips um Flugdetails ergänzt, ${fresh.length} neu angelegt, ${skipped.length} übersprungen.`;
     } catch (e) {
       msg.textContent = 'Import fehlgeschlagen: ' + e.message;
     }
