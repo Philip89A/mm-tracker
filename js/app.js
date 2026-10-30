@@ -11,11 +11,18 @@ const KEY_SENATOR_GROUND = 'senator-ground'; // nur noch zur einmaligen Migratio
 const KEY_GROUND = 'ground-by-year';
 const KEY_SETTINGS = 'settings';
 const KEY_LEVERS = 'levers';
+const KEY_RECONCILE = 'reconcile-log';
+const KEY_VOUCHERS = 'vouchers';
+const KEY_YEARPLAN = 'yearplan';
 const KEY_MILES_LOG = 'miles-log';
 const KEY_REDEMPTION_IDEAS = 'redemption-ideas';
 const KEY_PLANNED_HOTELS = 'planned-hotels';
 const KEY_YEAR_ARCHIVE = 'year-archive';
 const KEY_CC_MILES_BALANCE = 'cc-miles-balance';
+
+// Alle gespeicherten Datenbereiche (für Backup/Import); enthält auch die nicht mehr
+// angezeigten Altbereiche Inventar/Marktplatz, damit sie im Backup nicht verloren gehen.
+const ALL_DATA_KEYS = [KEY_BASE, KEY_TRIPS, KEY_PROMOS, KEY_UPTRIP, KEY_FRISTEN, KEY_INVENTORY, KEY_VALUECALC, KEY_UPGRADES, KEY_MARKETPLACE, KEY_SENATOR_GROUND, KEY_MILES_LOG, KEY_REDEMPTION_IDEAS, KEY_PLANNED_HOTELS, KEY_YEAR_ARCHIVE, KEY_CC_MILES_BALANCE, KEY_GROUND, KEY_SETTINGS, KEY_LEVERS, KEY_RECONCILE, KEY_VOUCHERS, KEY_YEARPLAN];
 
 let baseline = { p: 0, q: 0, m: 0 };
 let trips = [];
@@ -29,6 +36,9 @@ let marketplace = [];
 let senatorGround = { points: 0, qp: 0 }; // veraltet, nur für die Migration
 let groundByYear = {}; // { '2027': { points, qp } } — Zusatzpunkte je Saisonjahr
 let settings = { seasonYear: null, dashOrder: [], dashHidden: [] };
+let reconcileLog = []; // Kontoabgleiche: { id, date, accP, accQ, accM, appP, appQ, appM }
+let vouchers = []; // Gutscheine/Benefits: { id, type, title, expires, note, used, usedDate, createdAt }
+let yearPlan = {}; // { '2026': { taskId: true } } — manuell abgehakte Jahresplan-Aufgaben
 let levers = []; // tatsächlich genutzte Umtausche: { id, type: 'cc'|'swap800', date, miles, points, qp }
 let milesLog = [];
 let redemptionIdeas = [];
@@ -467,6 +477,11 @@ function render() {
     (typeof renderRouteMap === 'function' ? renderRouteMap : function renderRouteMap() {}),
     renderFlightsNeeded,
     renderLevers,
+    (typeof renderReconcile === 'function' ? renderReconcile : function renderReconcile() {}),
+    (typeof renderVouchers === 'function' ? renderVouchers : function renderVouchers() {}),
+    (typeof renderYearPlan === 'function' ? renderYearPlan : function renderYearPlan() {}),
+    (typeof renderStats === 'function' ? renderStats : function renderStats() {}),
+    (typeof renderBackupStatus === 'function' ? renderBackupStatus : function renderBackupStatus() {}),
     renderPromoTemplates,
     renderPromos,
     renderUptrip,
@@ -591,8 +606,11 @@ function renderTracker() {
 
 // Dashboard-Karten ein-/ausblenden und umsortieren (Hero-Karte bleibt immer oben).
 const DASH_CARDS = [
-  { id: 'prognose', label: 'Prognose: Noch benötigte Flüge' },
+  { id: 'plan', label: 'Jahresplan (Checkliste)' },
   { id: 'tracker', label: 'Tempo & Quartale' },
+  { id: 'prognose', label: 'Prognose: Noch benötigte Flüge & Hebel' },
+  { id: 'konto', label: 'Kontoabgleich' },
+  { id: 'gutscheine', label: 'Gutscheine & Benefits' },
   { id: 'fristen', label: 'Fristen & Ablaufdaten' },
   { id: 'basis', label: 'Basiswerte & Boden-Punkte' },
   { id: 'archiv', label: 'Jahres-Archiv' }
@@ -1094,8 +1112,14 @@ function icsEscape(s) {
 window.downloadFristIcs = function(idx) {
   const f = fristen[idx];
   if (!f || !f.date) return;
+  downloadIcs(f.title, f.date, f.note, 'Frist');
+};
+
+// Ganztägiger Kalendereintrag als .ics-Download (Fristen, Gutscheine, ...).
+function downloadIcs(title, dateStr, note, fallbackName) {
+  const f = { title, date: dateStr, note };
   const dt = f.date.replace(/-/g, '');
-  const uid = 'mm-frist-' + dt + '-' + Math.random().toString(36).slice(2, 10) + '@mm-tracker';
+  const uid = 'mm-' + dt + '-' + Math.random().toString(36).slice(2, 10) + '@mm-tracker';
   const stamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
   const lines = [
     'BEGIN:VCALENDAR',
@@ -1112,8 +1136,8 @@ window.downloadFristIcs = function(idx) {
     'END:VEVENT',
     'END:VCALENDAR'
   ].filter(Boolean);
-  downloadBlob(lines.join('\r\n'), 'text/calendar;charset=utf-8;', (f.title || 'Frist').replace(/[^a-z0-9]+/gi, '_') + '.ics');
-};
+  downloadBlob(lines.join('\r\n'), 'text/calendar;charset=utf-8;', (f.title || fallbackName || 'Termin').replace(/[^a-z0-9]+/gi, '_') + '.ics');
+}
 
 function renderCalc() {
   const list = document.getElementById('calc-list');
@@ -1629,6 +1653,9 @@ async function saveMarketplace() { await DB.set(KEY_MARKETPLACE, marketplace); }
 async function saveGround() { await DB.set(KEY_GROUND, groundByYear); }
 async function saveSettings() { await DB.set(KEY_SETTINGS, settings); }
 async function saveLevers() { await DB.set(KEY_LEVERS, levers); }
+async function saveReconcile() { await DB.set(KEY_RECONCILE, reconcileLog); }
+async function saveVouchers() { await DB.set(KEY_VOUCHERS, vouchers); }
+async function saveYearPlan() { await DB.set(KEY_YEARPLAN, yearPlan); }
 async function saveMilesLog() { await DB.set(KEY_MILES_LOG, milesLog); }
 async function saveRedemptionIdeas() { await DB.set(KEY_REDEMPTION_IDEAS, redemptionIdeas); }
 async function savePlannedHotels() { await DB.set(KEY_PLANNED_HOTELS, plannedHotels); }
@@ -1644,6 +1671,9 @@ async function loadAll() {
   senatorGround = await DB.get(KEY_SENATOR_GROUND, senatorGround);
   groundByYear = await DB.get(KEY_GROUND, {});
   levers = await DB.get(KEY_LEVERS, []);
+  reconcileLog = await DB.get(KEY_RECONCILE, []);
+  vouchers = await DB.get(KEY_VOUCHERS, []);
+  yearPlan = await DB.get(KEY_YEARPLAN, {});
   settings = Object.assign({ seasonYear: null, dashOrder: [], dashHidden: [] }, await DB.get(KEY_SETTINGS, {}));
   // Boden-Punkte waren früher ein einzelner Wert, der fest für 2027 galt.
   if (Object.keys(groundByYear).length === 0 && (senatorGround.points > 0 || senatorGround.qp > 0)) {

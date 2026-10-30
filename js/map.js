@@ -518,6 +518,19 @@
   initMapInteraction();
   initPlanner();
 
-  // Für Tests/Debugging aus der Konsole erreichbar.
-  window.MMMap = { parseRoute, distanceKm, airportOf, computePlannerOptions, searchAirports };
+  // Teilstrecken eines Trips (Paare aufeinanderfolgender IATA-Codes) mit Gewicht
+  // (Segmentzahl / Zahl der Teilstrecken) und Luftlinien-Kilometern.
+  function tripLegs(t) {
+    const { known } = parseRoute(t.route);
+    const pairs = [];
+    for (let i = 0; i < known.length - 1; i++) if (known[i] !== known[i + 1]) pairs.push([known[i], known[i + 1]]);
+    const weight = pairs.length ? (t.segments || pairs.length) / pairs.length : 0;
+    return pairs.map(([from, to]) => ({ from, to, weight, km: distanceKm(airportOf(from), airportOf(to)) }));
+  }
+  function tripKm(t) {
+    return tripLegs(t).reduce((s, l) => s + l.km * l.weight, 0);
+  }
+
+  // Für Tests/Debugging und die Statistik (extras.js) erreichbar.
+  window.MMMap = { parseRoute, distanceKm, airportOf, computePlannerOptions, searchAirports, tripLegs, tripKm };
 })();

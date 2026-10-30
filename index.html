@@ -152,6 +152,61 @@
       <div id="flights-needed-list" style="margin-top:10px;"></div>
     </div>
 
+    <div class="card" data-card="plan">
+      <h2>🗓️ Jahresplan <span id="plan-year"></span> <span class="badge" id="plan-count">0</span></h2>
+      <p class="hint" style="margin-top:0;">Was jetzt ansteht, damit im Status-Jahr nichts untergeht. Manche Punkte erkennt die App selbst als erledigt (z.B. Kontoabgleich, Backup, genutzte Hebel).</p>
+      <div id="plan-now"></div>
+      <details style="margin-top:10px;">
+        <summary style="cursor:pointer; font-weight:600; color:var(--navy);">Alle Monate anzeigen</summary>
+        <div id="plan-all" style="margin-top:6px;"></div>
+      </details>
+    </div>
+
+    <div class="card" data-card="konto">
+      <h2>🔍 Kontoabgleich</h2>
+      <p class="hint" style="margin-top:0;">Trag den Stand laut Miles &amp; More ein. Die App vergleicht ihn mit ihrer eigenen Rechnung für das <b>laufende Jahr</b> (ohne Geplantes) und zeigt, wo sie abweicht. Eine Differenz lässt sich mit einem Klick als Boden-Punkte bzw. Meilen-Korrektur verbuchen.</p>
+      <div class="row2">
+        <div><label style="margin-top:0;">Points laut Konto</label><input type="number" id="rc-p" min="0" placeholder="0"></div>
+        <div><label style="margin-top:0;">QP laut Konto</label><input type="number" id="rc-q" min="0" placeholder="0"></div>
+      </div>
+      <div class="row2">
+        <div><label>Meilen laut Konto</label><input type="number" id="rc-m" placeholder="0"></div>
+        <div><label>Stand vom</label><input type="date" id="rc-date"></div>
+      </div>
+      <button type="button" class="btn secondary" id="rc-btn">Abgleichen</button>
+      <div id="rc-result" style="margin-top:10px;"></div>
+      <div id="rc-history" style="margin-top:6px;"></div>
+    </div>
+
+    <div class="card" data-card="gutscheine">
+      <h2>🎟️ Gutscheine &amp; Benefits <span class="badge" id="voucher-count">0</span></h2>
+      <p class="hint" id="voucher-hint" style="margin-top:0; display:none;"></p>
+      <div id="voucher-list"><div class="empty">Noch keine Gutscheine erfasst.</div></div>
+      <details style="margin-top:12px;" id="voucher-details">
+        <summary style="cursor:pointer; font-weight:600; color:var(--navy);">➕ Gutschein eintragen</summary>
+        <form id="voucher-form" style="margin-top:6px;">
+          <div class="row2">
+            <div>
+              <label style="margin-top:0;">Art</label>
+              <select id="vo-type">
+                <option value="evoucher">eVoucher</option>
+                <option value="upgrade">Upgrade-Gutschein</option>
+                <option value="lounge">Lounge-Zutritt</option>
+                <option value="other">Sonstiges</option>
+              </select>
+            </div>
+            <div><label style="margin-top:0;">Läuft ab am</label><input type="date" id="vo-expires"></div>
+          </div>
+          <label>Bezeichnung</label>
+          <input type="text" id="vo-title" placeholder="z.B. eVoucher 2026 (Europa)">
+          <label>Notiz</label>
+          <input type="text" id="vo-note" placeholder="optional, z.B. Code oder Bedingungen">
+          <button type="submit" class="btn secondary" id="voucher-submit-btn">Gutschein speichern</button>
+          <button type="button" class="btn secondary" id="voucher-cancel-btn" style="display:none;" onclick="cancelEditVoucher()">Bearbeiten abbrechen</button>
+        </form>
+      </details>
+    </div>
+
     <div class="card" data-card="tracker">
       <h2 id="tracker-title">⏱️ Tempo & Quartale</h2>
       <div id="tracker-status" class="hint" style="margin-top:0;"></div>
@@ -416,6 +471,11 @@
       <div id="year-chart"></div>
     </div>
 
+    <div class="card" id="card-stats">
+      <h2>📊 Statistik</h2>
+      <p class="hint" style="margin-top:0;">Gilt für die Filter über der Karte (nur bereits geflogene, nicht geplante Trips). Der Vergleich je Jahr unten ignoriert den Jahresfilter.</p>
+      <div id="stats-body"><div class="empty">Noch keine Trips erfasst.</div></div>
+    </div>
   </section>
 
   <!-- TAB: SAMMELN -->
@@ -670,6 +730,16 @@
       </form>
     </div>
 
+    <div class="card">
+      <h2>💾 Backup &amp; Wiederherstellung</h2>
+      <p class="hint" style="margin-top:0;">Sichert <b>alle</b> Daten (Trips, Meilen, Hotels, Gutscheine, Einstellungen …) in einer JSON-Datei — auch die nicht mehr angezeigten Uptrip-Altdaten. Der Import überschreibt die Datenbereiche, die in der Datei enthalten sind.</p>
+      <p class="hint" id="backup-status" style="margin:0 0 8px;"></p>
+      <button type="button" class="btn secondary" id="backup-export-btn">⬇️ Backup exportieren</button>
+      <label style="margin-top:14px;">Backup importieren</label>
+      <input type="file" id="backup-import-file" accept="application/json,.json">
+      <p class="hint" id="backup-msg" style="margin:6px 0 0;"></p>
+    </div>
+
     <div class="card" style="text-align:center;">
       <button class="btn secondary" id="reset-btn" style="border-color:#c0392b; color:#c0392b;">Alle Daten zurücksetzen</button>
     </div>
@@ -696,6 +766,7 @@
 <script src="js/data/countries.js"></script>
 <script src="js/app.js"></script>
 <script src="js/map.js"></script>
+<script src="js/extras.js"></script>
 <script src="js/auth.js"></script>
 </body>
 </html>
