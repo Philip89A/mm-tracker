@@ -10,6 +10,7 @@ const KEY_MARKETPLACE = 'marketplace';
 const KEY_SENATOR_GROUND = 'senator-ground'; // nur noch zur einmaligen Migration
 const KEY_GROUND = 'ground-by-year';
 const KEY_SETTINGS = 'settings';
+const KEY_LEVERS = 'levers';
 const KEY_MILES_LOG = 'miles-log';
 const KEY_REDEMPTION_IDEAS = 'redemption-ideas';
 const KEY_PLANNED_HOTELS = 'planned-hotels';
@@ -28,13 +29,14 @@ let marketplace = [];
 let senatorGround = { points: 0, qp: 0 }; // veraltet, nur für die Migration
 let groundByYear = {}; // { '2027': { points, qp } } — Zusatzpunkte je Saisonjahr
 let settings = { seasonYear: null, dashOrder: [], dashHidden: [] };
+let levers = []; // tatsächlich genutzte Umtausche: { id, type: 'cc'|'swap800', date, miles, points, qp }
 let milesLog = [];
 let redemptionIdeas = [];
 let plannedHotels = [];
 let yearArchive = []; // { year, closedAt, points, qp, meilenAtClose, goalsReached }
 let ccMilesBalance = 0; // manuell gepflegter Kreditkarten-Meilen-Stand
 
-const MILES_CATEGORIES = ['Flüge', 'Flughafen', 'Executive Meilen', 'CO2-Kompensation', 'Kreditkarte', 'Hotel', 'Mietwagen', 'Fahrdienst', 'Shopping', 'Parken', 'Zeitschriften-Abo', 'Reise-Buchungsportale', 'Uptrip', 'Fremdprogramm-Umwandlung', 'Kulanz/Sonstiges'];
+const MILES_CATEGORIES = ['Flüge', 'Flughafen', 'Executive Meilen', 'CO2-Kompensation', 'Kreditkarte', 'Hotel', 'Mietwagen', 'Fahrdienst', 'Shopping', 'Parken', 'Zeitschriften-Abo', 'Reise-Buchungsportale', 'Uptrip', 'Fremdprogramm-Umwandlung', 'Statuspunkte-Tausch', 'Kulanz/Sonstiges'];
 
 // Feste Farbe je Kategorie, damit sie in Aufschlüsselung/Liste auf einen
 // Blick optisch unterscheidbar sind — unabhängig von Sortierung/Filterung.
@@ -53,6 +55,7 @@ const CATEGORY_COLORS = {
   'Reise-Buchungsportale': '#15AABF',
   'Uptrip': '#BE4BDB',
   'Fremdprogramm-Umwandlung': '#FAB005',
+  'Statuspunkte-Tausch': '#C92A2A',
   'Kulanz/Sonstiges': '#868E96'
 };
 function categoryColor(cat) { return CATEGORY_COLORS[cat] || '#868E96'; }
@@ -99,9 +102,17 @@ let calcCcMiles = 0;
 // Der Kreditkarten-Meilentausch geht nur in 5.000er-Schritten, gedeckelt auf
 // 25.000 Meilen/Jahr — und natürlich nie mehr, als tatsächlich auf dem
 // Kartenkonto vorhanden ist.
-function maxRedeemableCcMiles(balance) {
-  const capped = Math.min(balance || 0, 25000);
+function maxRedeemableCcMiles(balance, usedThisYear = 0) {
+  const capped = Math.min(balance || 0, Math.max(0, 25000 - usedThisYear));
   return Math.floor(capped / 5000) * 5000;
+}
+
+// Bereits tatsächlich genutzte Hebel (siehe Karte "Genutzte Hebel").
+function leverUsedCcMiles(year) {
+  return levers.filter(l => l.type === 'cc' && (l.date || '').startsWith(year)).reduce((s, l) => s + (l.miles || 0), 0);
+}
+function leverSwapUsed(year) {
+  return levers.some(l => l.type === 'swap800' && (l.date || '').startsWith(year));
 }
 
 // Leiter der Jahresziele: Frequent Traveller -> 700 QP -> 800 QP -> Senator
@@ -184,11 +195,26 @@ function pointsForSegment(range, cls) {
   return (table[range] && table[range][cls]) || 0;
 }
 
+// Points eines Trips. Ein manueller Wert (pointsOverride, z.B. für Partner-
+// Airlines, deren Points nicht aus der Lufthansa-Group-Tabelle stammen, oder
+// für Kulanz/Korrekturen) hat Vorrang vor der Tabelle.
 function tripPoints(t) {
+  if (t.pointsOverride > 0) return t.pointsOverride;
   const base = pointsForSegment(t.range, t.cls) * t.segments;
   const bonus = Math.round(base * (t.co2 / 100));
   return base + bonus;
 }
+
+// QP eines Trips: bei Lufthansa-Group-Flügen identisch zu den Points, bei
+// Partner-Airlines (qpMode 'pointsOnly') gibt es nur Points, keine QP.
+function tripQP(t) {
+  return t.qpMode === 'pointsOnly' ? 0 : tripPoints(t);
+}
+
+// Airlines, bei denen die Sammelart sicher feststeht (Auswahl im Trip-Formular
+// setzt sie vor). Alles andere (z.B. Eurowings) bleibt eine bewusste Eingabe.
+const QP_AIRLINES_FULL = ['lufthansa', 'swiss', 'austrian airlines', 'brussels airlines', 'discover airlines', 'lot polish airlines', 'ita airways', 'air dolomiti', 'croatia airlines', 'luxair'];
+const QP_AIRLINES_PARTNER = ['air canada', 'united', 'singapore airlines', 'ana', 'thai airways', 'turkish airlines', 'sas'];
 
 // Zusatz-QP, die ein bezahltes Upgrade gegenüber der ursprünglich gebuchten
 // Klasse bringt. Die Punkte selbst stecken schon zu 100% in tripPoints() (Klasse
@@ -250,15 +276,17 @@ function computeAchievedTotals(year = seasonYear()) {
   trips.forEach(t => {
     if (t.historical || t.planned) return;
     if (!t.date || !t.date.startsWith(year)) return; // sauberer Jahres-Cut für Points/QP
-    const total = tripPoints(t);
-    p += total;
-    q += total;
+    p += tripPoints(t);
+    q += tripQP(t);
   });
   uptripItems.forEach(u => {
     const timesThisYear = uptripRedemptionsInYear(u, year);
     p += (u.rewardPoints || 0) * timesThisYear;
     q += (u.rewardQP || 0) * timesThisYear;
     m += (u.rewardMeilen || 0) * (u.redemptionCount || 0); // Meilen bleiben jahresübergreifend zählbar
+  });
+  levers.forEach(l => {
+    if (l.date && l.date.startsWith(year)) { p += l.points || 0; q += l.qp || 0; }
   });
   // Als "erledigt" markierte Hotelaufenthalte (h.planned === false) zählen
   // als erzielt statt als geplant — siehe markPlannedHotelDone().
@@ -286,9 +314,8 @@ function computePlannedDelta(year = seasonYear()) {
   const plannedTripIds = new Set();
   trips.forEach(t => {
     if (t.planned && !t.historical && t.date && t.date.startsWith(year)) {
-      const total = tripPoints(t);
-      p += total;
-      q += total;
+      p += tripPoints(t);
+      q += tripQP(t);
       tripCount += 1;
       plannedTripIds.add(t.id);
     }
@@ -439,6 +466,7 @@ function render() {
     renderYearChart,
     (typeof renderRouteMap === 'function' ? renderRouteMap : function renderRouteMap() {}),
     renderFlightsNeeded,
+    renderLevers,
     renderPromoTemplates,
     renderPromos,
     renderUptrip,
@@ -687,6 +715,8 @@ function renderTrips() {
   const noteEl = document.getElementById('trip-filter-note');
   upgSummaryEl.style.display = 'none';
   noteEl.textContent = '';
+  const costEl = document.getElementById('trip-cost-summary');
+  costEl.style.display = 'none';
 
   if (trips.length === 0) {
     list.innerHTML = '<div class="empty">Noch keine Trips erfasst.</div>';
@@ -700,6 +730,12 @@ function renderTrips() {
   }
 
   const filterYear = document.getElementById('tf-year').value;
+  const paid = filtered.filter(t => t.cost > 0 && !t.planned);
+  if (paid.length > 0) {
+    const cost = paid.reduce((s, t) => s + t.cost, 0), qp = paid.reduce((s, t) => s + tripQP(t), 0), costQp = paid.filter(t => tripQP(t) > 0).reduce((s, t) => s + t.cost, 0);
+    costEl.textContent = `💶 Ausgaben${filterYear ? ' ' + filterYear : ''}: ${cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} € für ${paid.length} bezahlte ${paid.length === 1 ? 'Flug' : 'Flüge'}${qp > 0 ? ` (Ø ${(costQp / qp).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})} €/QP, nur Flüge mit QP)` : ''} — nur Trips mit eingetragenem Preis, ohne geplante.`;
+    costEl.style.display = 'block';
+  }
   const upgraded = filtered.filter(t => t.upgradeCost > 0 && tripUpgradeDeltaQP(t) > 0);
   if (upgraded.length > 0) {
     const cost = upgraded.reduce((s, t) => s + t.upgradeCost, 0);
@@ -725,8 +761,8 @@ function renderTrips() {
 
   const groupStats = {};
   if (grouper) sorted.forEach(t => {
-    const g = (groupStats[grouper.key(t)] = groupStats[grouper.key(t)] || { n: 0, pts: 0 });
-    g.n += 1; g.pts += t.historical ? 0 : tripPoints(t);
+    const g = (groupStats[grouper.key(t)] = groupStats[grouper.key(t)] || { n: 0, pts: 0, qp: 0 });
+    g.n += 1; if (!t.historical) { g.pts += tripPoints(t); g.qp += tripQP(t); }
   });
 
   let lastGroup = null;
@@ -739,21 +775,22 @@ function renderTrips() {
       if (gk !== lastGroup) {
         lastGroup = gk;
         const gs = groupStats[gk];
-        head = `<div class="group-head"><span>${escHtml(grouper.label(gk))}</span><span>${gs.n} Trip${gs.n === 1 ? '' : 's'} · +${gs.pts} P/QP</span></div>`;
+        head = `<div class="group-head"><span>${escHtml(grouper.label(gk))}</span><span>${gs.n} Trip${gs.n === 1 ? '' : 's'} · +${gs.pts} P${gs.qp !== gs.pts ? ' · +' + gs.qp + ' QP' : '/QP'}</span></div>`;
       }
     }
     return head + `<div class="trip">
       <div class="top">
         <div>
           <div class="route">${escHtml(t.route)}</div>
-          <div class="meta">${t.date} · ${t.range === 'continental' ? 'Kontinental' : 'Interkont.'} · ${labelClass(t.cls)} · ${t.segments} Segm.${t.co2 > 0 ? ' · CO₂ +' + t.co2 + '%' : ''}${t.airline ? ' · ' + escHtml(t.airline) : ''}</div>
+          <div class="meta">${t.date} · ${t.range === 'continental' ? 'Kontinental' : 'Interkont.'} · ${labelClass(t.cls)} · ${t.segments} Segm.${t.co2 > 0 ? ' · CO₂ +' + t.co2 + '%' : ''}${t.airline ? ' · ' + escHtml(t.airline) : ''}${t.qpMode === 'pointsOnly' ? ' · Partner' : ''}</div>
+          ${t.cost > 0 ? `<div class="meta">💶 ${t.cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} €${tripQP(t) > 0 ? ' · ' + (t.cost / tripQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP' : (tripPoints(t) > 0 ? ' · ' + (t.cost / tripPoints(t)).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/Point (keine QP)' : '')}</div>` : ''}
           ${t.historical ? `<div class="meta"><span class="tag mid">🕰️ Historisch — nicht in Gesamtsumme</span></div>` : ''}
           ${t.planned ? `<div class="meta"><span class="tag ok">📅 Geplant</span></div>` : ''}
           ${tripUpgradeDeltaQP(t) > 0 ? `<div class="meta">⬆️ Upgrade von ${labelClass(t.upgradeFrom)}${t.upgradeCost > 0 ? ': ' + t.upgradeCost.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' € für +' + tripUpgradeDeltaQP(t) + ' QP (' + (t.upgradeCost / tripUpgradeDeltaQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP)' : ''}</div>` : ''}
           ${t.note ? `<div class="meta">📝 ${escHtml(t.note)}</div>` : ''}
         </div>
         <div class="pts">
-          <div class="p" style="${t.historical ? 'opacity:0.5; text-decoration:line-through;' : (t.planned ? 'opacity:0.6;' : '')}">+${total} P/QP</div>
+          <div class="p" style="${t.historical ? 'opacity:0.5; text-decoration:line-through;' : (t.planned ? 'opacity:0.6;' : '')}">+${total} P${tripQP(t) !== total ? ' · +' + tripQP(t) + ' QP' : '/QP'}</div>
         </div>
       </div>
       <div class="flex-between" style="margin-top:6px;">
@@ -770,10 +807,9 @@ function renderYearChart() {
   trips.forEach(t => {
     if (!t.date) return;
     const y = t.date.slice(0, 4);
-    const pts = tripPoints(t);
     byYear[y] = byYear[y] || { p: 0, q: 0 };
-    byYear[y].p += pts;
-    byYear[y].q += pts;
+    byYear[y].p += tripPoints(t);
+    byYear[y].q += tripQP(t);
   });
   Object.entries(groundByYear).forEach(([y, g]) => {
     if (!(g.points > 0) && !(g.qp > 0)) return;
@@ -812,6 +848,71 @@ function renderYearChart() {
 // zum jeweils nächsten noch offenen Ziel nötig sind — Basis ist der Stand
 // INKLUSIVE bereits geplanter Flüge/Hotelaufenthalte, da diese ja schon
 // "eingeplant" sind und nicht nochmal draufgerechnet werden sollen.
+function renderLevers() {
+  const listEl = document.getElementById('levers-list');
+  if (!listEl) return;
+  const sy = seasonYear();
+  document.getElementById('levers-year').textContent = sy;
+  const mine = levers.filter(l => (l.date || '').startsWith(sy)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  listEl.innerHTML = mine.length ? mine.map(l => `<div class="flex-between" style="margin-top:6px; font-size:13px;">
+      <span>${l.type === 'cc' ? '💳 Kreditkarten-Tausch' : '🔄 800-QP-Meilentausch'} · ${l.date} · ${(l.miles || 0).toLocaleString('de-DE')} Meilen → <b>+${l.points} P / +${l.qp} QP</b></span>
+      <button class="del" onclick="deleteLever('${l.id}')">entfernen</button>
+    </div>`).join('') : '<div class="meta-line" style="margin-top:4px; color:var(--muted); font-size:12px;">Noch kein Hebel in dieser Saison genutzt.</div>';
+  const usedCc = leverUsedCcMiles(sy), ach = computeAchievedTotals(sy);
+  const swapText = leverSwapUsed(sy) ? 'genutzt ✅' : (ach.q >= 800 ? 'freigeschaltet, noch offen' : `noch nicht freigeschaltet (${ach.q} von 800 QP)`);
+  document.getElementById('levers-quota').textContent = `Kreditkarten-Tausch: ${usedCc.toLocaleString('de-DE')} von 25.000 Meilen genutzt (${(25000 - usedCc).toLocaleString('de-DE')} frei) · 800-QP-Tausch: ${swapText}`;
+  const sw = document.getElementById('calc-lever-800');
+  if (sw) { sw.disabled = leverSwapUsed(sy); if (sw.disabled) { sw.checked = false; calcLever800 = false; } }
+}
+
+window.deleteLever = async function(id) {
+  if (!confirm('Diesen Hebel entfernen? Die dazugehörige Meilen-Buchung wird ebenfalls gelöscht und die Points/QP wieder abgezogen.')) return;
+  levers = levers.filter(l => l.id !== id);
+  milesLog = milesLog.filter(mv => mv.sourceLeverId !== id);
+  await saveLevers(); await saveMilesLog();
+  render();
+};
+
+document.getElementById('lever-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('lv-msg');
+  const type = document.getElementById('lv-type').value;
+  const date = document.getElementById('lv-date').value;
+  const miles = parseInt(document.getElementById('lv-miles').value) || 0;
+  const year = date.slice(0, 4);
+  if (!date || miles <= 0) { msg.textContent = 'Bitte Datum und Meilen angeben.'; return; }
+  let entry;
+  if (type === 'cc') {
+    const free = 25000 - leverUsedCcMiles(year);
+    if (miles % 5000 !== 0) { msg.textContent = 'Der Kreditkarten-Tausch geht nur in 5.000er-Schritten.'; return; }
+    if (miles > free) { msg.textContent = `Für ${year} sind nur noch ${free.toLocaleString('de-DE')} Meilen frei (Deckel 25.000/Jahr).`; return; }
+    entry = { type, date, miles, points: miles / 250, qp: miles / 250 };
+  } else {
+    if (leverSwapUsed(year)) { msg.textContent = `Der 800-QP-Meilentausch ist für ${year} schon eingetragen.`; return; }
+    const q = computeAchievedTotals(year).q;
+    if (q < 800) { msg.textContent = `Für ${year} sind erst ${q} QP erzielt — der Tausch wird ab 800 QP freigeschaltet.`; return; }
+    if (miles > 20000) { msg.textContent = 'Es können höchstens 20.000 Meilen getauscht werden.'; return; }
+    entry = { type, date, miles, points: 125, qp: 125 };
+  }
+  entry.id = genId();
+  levers.push(entry);
+  milesLog.push({
+    id: genId(), date, category: 'Statuspunkte-Tausch', source: '', amount: -miles,
+    note: `Hebel: ${type === 'cc' ? 'Kreditkarten-Tausch' : '800-QP-Meilentausch'} (+${entry.points} P/+${entry.qp} QP)`, sourceLeverId: entry.id
+  });
+  await saveLevers(); await saveMilesLog();
+  msg.textContent = `Verbucht: +${entry.points} Points / +${entry.qp} QP, ${miles.toLocaleString('de-DE')} Meilen als Abgang im Meilen-Tab. Kartenstand ggf. oben aktualisieren.`;
+  document.getElementById('lv-miles').value = '';
+  render();
+});
+
+document.getElementById('lv-type').addEventListener('change', () => {
+  const swap = document.getElementById('lv-type').value === 'swap800';
+  document.getElementById('lv-miles').value = swap ? 20000 : 5000;
+  document.getElementById('lv-miles-label').textContent = swap ? 'Getauschte Meilen (max. 20.000, ergibt +125 P / +125 QP)' : 'Getauschte Kreditkarten-Meilen (5.000er-Schritte, 250 Meilen = 1 P + 1 QP)';
+});
+document.getElementById('lv-date').value = new Date().toISOString().slice(0, 10);
+
 function renderFlightsNeeded() {
   const el = document.getElementById('flights-needed-list');
   if (!el) return;
@@ -819,7 +920,8 @@ function renderFlightsNeeded() {
   // Slider-Obergrenze am tatsächlich verfügbaren Kreditkarten-Meilen-Stand
   // ausrichten (min. mit dem 25.000er-Jahresdeckel) — mehr als vorhanden
   // oder erlaubt lässt sich gar nicht erst einstellen.
-  const maxCc = maxRedeemableCcMiles(ccMilesBalance);
+  const usedCc = leverUsedCcMiles(seasonYear()), swapUsed = leverSwapUsed(seasonYear());
+  const maxCc = maxRedeemableCcMiles(ccMilesBalance, usedCc);
   const sliderEl = document.getElementById('calc-cc-miles');
   if (sliderEl) {
     sliderEl.max = maxCc;
@@ -860,7 +962,7 @@ function renderFlightsNeeded() {
     let p = projected.p + ccPQ;
     let q = projected.q + ccPQ;
     const lever800Eligible = q >= 800;
-    if (calcLever800 && lever800Eligible) { p += 125; q += 125; }
+    if (calcLever800 && !swapUsed && lever800Eligible) { p += 125; q += 125; }
 
     // Bei Zielen mit eigenem Points-Anteil (pTarget, z.B. Frequent Traveller,
     // Senator) sind Points UND QP beide bindend — da Lufthansa-Group-Flüge P
@@ -881,7 +983,7 @@ function renderFlightsNeeded() {
 
     const leverNotes = [];
     if (ccPQ > 0) leverNotes.push(`+${ccPQ} P/QP Kreditkarten-Tausch`);
-    if (calcLever800) leverNotes.push(lever800Eligible ? '+125 P/QP 800-QP-Meilentausch' : '800-QP-Meilentausch: noch nicht freigeschaltet (<800 QP)');
+    if (calcLever800) leverNotes.push(swapUsed ? '800-QP-Meilentausch: in dieser Saison bereits genutzt (steckt schon im Stand)' : lever800Eligible ? '+125 P/QP 800-QP-Meilentausch' : '800-QP-Meilentausch: noch nicht freigeschaltet (<800 QP)');
 
     return `<div class="miles-cat-row">
       <div style="font-weight:600; color:var(--navy);">${g.shortLabel} <span style="font-weight:400; color:var(--muted);">(Jahr ${g.year()})</span> — noch ${shortfallLabel}</div>
@@ -1184,7 +1286,7 @@ function csvEscape(v) {
 }
 
 window.exportTripsCsv = function() {
-  const header = ['Datum', 'Strecke', 'Airline', 'Reichweite', 'Klasse', 'Segmente', 'CO2-Bonus %', 'Points/QP', 'Upgrade von', 'Upgrade-Kosten €', 'Zusatz-QP durch Upgrade', 'Historisch', 'Geplant', 'Notiz'];
+  const header = ['Datum', 'Strecke', 'Airline', 'Reichweite', 'Klasse', 'Segmente', 'CO2-Bonus %', 'Points', 'QP', 'Preis €', 'Sammelart', 'Upgrade von', 'Upgrade-Kosten €', 'Zusatz-QP durch Upgrade', 'Historisch', 'Geplant', 'Notiz'];
   const sorted = [...trips].sort((a, b) => new Date(a.date) - new Date(b.date));
   const rows = sorted.map(t => [
     t.date,
@@ -1195,6 +1297,9 @@ window.exportTripsCsv = function() {
     t.segments,
     t.co2,
     tripPoints(t),
+    tripQP(t),
+    t.cost || '',
+    t.qpMode === 'pointsOnly' ? 'Partner (nur Points)' : 'Lufthansa Group',
     t.upgradeFrom ? labelClass(t.upgradeFrom) : '',
     t.upgradeCost || '',
     tripUpgradeDeltaQP(t) || '',
@@ -1478,7 +1583,7 @@ window.saveCcMilesBalance = async function() {
   await DB.set(KEY_CC_MILES_BALANCE, ccMilesBalance);
   // Simulierten Tausch auf den neuen, tatsächlich verfügbaren Höchstwert
   // setzen — beantwortet direkt "wie viele Points/QP wären das max.?".
-  calcCcMiles = maxRedeemableCcMiles(ccMilesBalance);
+  calcCcMiles = maxRedeemableCcMiles(ccMilesBalance, leverUsedCcMiles(seasonYear()));
   const sliderEl = document.getElementById('calc-cc-miles');
   // Erst max anheben, DANN value setzen — sonst klemmt der Browser value
   // beim Zuweisen sofort auf dem noch alten (kleineren) max fest.
@@ -1523,6 +1628,7 @@ async function saveUpgrades() { await DB.set(KEY_UPGRADES, upgrades); }
 async function saveMarketplace() { await DB.set(KEY_MARKETPLACE, marketplace); }
 async function saveGround() { await DB.set(KEY_GROUND, groundByYear); }
 async function saveSettings() { await DB.set(KEY_SETTINGS, settings); }
+async function saveLevers() { await DB.set(KEY_LEVERS, levers); }
 async function saveMilesLog() { await DB.set(KEY_MILES_LOG, milesLog); }
 async function saveRedemptionIdeas() { await DB.set(KEY_REDEMPTION_IDEAS, redemptionIdeas); }
 async function savePlannedHotels() { await DB.set(KEY_PLANNED_HOTELS, plannedHotels); }
@@ -1537,6 +1643,7 @@ async function loadAll() {
   upgrades = await DB.get(KEY_UPGRADES, []);
   senatorGround = await DB.get(KEY_SENATOR_GROUND, senatorGround);
   groundByYear = await DB.get(KEY_GROUND, {});
+  levers = await DB.get(KEY_LEVERS, []);
   settings = Object.assign({ seasonYear: null, dashOrder: [], dashHidden: [] }, await DB.get(KEY_SETTINGS, {}));
   // Boden-Punkte waren früher ein einzelner Wert, der fest für 2027 galt.
   if (Object.keys(groundByYear).length === 0 && (senatorGround.points > 0 || senatorGround.qp > 0)) {
@@ -1716,6 +1823,9 @@ window.startEditTrip = function(idx) {
   document.getElementById('t-airline').value = t.airline || '';
   document.getElementById('t-upgrade-from').value = t.upgradeFrom || '';
   document.getElementById('t-upgrade-cost').value = t.upgradeCost || '';
+  document.getElementById('t-qpmode').value = t.qpMode || '';
+  document.getElementById('t-points-override').value = t.pointsOverride || '';
+  document.getElementById('t-cost').value = t.cost || '';
   const linkedMiles = milesLog.filter(mv => mv.sourceTripId === t.id);
   document.getElementById('t-miles').value = (linkedMiles.find(mv => mv.category === 'Flüge') || {}).amount || '';
   document.getElementById('t-exec-miles').value = (linkedMiles.find(mv => mv.category === 'Executive Meilen') || {}).amount || '';
@@ -1751,7 +1861,10 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     planned: document.getElementById('t-planned').checked,
     airline: document.getElementById('t-airline').value.trim(),
     upgradeFrom: document.getElementById('t-upgrade-from').value,
-    upgradeCost: parseFloat(document.getElementById('t-upgrade-cost').value) || 0
+    upgradeCost: parseFloat(document.getElementById('t-upgrade-cost').value) || 0,
+    qpMode: document.getElementById('t-qpmode').value,
+    pointsOverride: parseInt(document.getElementById('t-points-override').value) || 0,
+    cost: parseFloat(document.getElementById('t-cost').value) || 0
   };
   if (isEdit) {
     const idx = trips.findIndex(t => t.id === tripId);
@@ -1879,6 +1992,13 @@ document.getElementById('mi-filter-year').addEventListener('change', renderMiles
   if (typeof renderRouteMap === 'function') renderRouteMap();
 }));
 document.getElementById('trip-sort').addEventListener('change', renderTrips);
+
+// Bei eindeutig bekannten Airlines die Sammelart vorschlagen (bleibt änderbar).
+document.getElementById('t-airline').addEventListener('input', (e) => {
+  const v = e.target.value.trim().toLowerCase();
+  if (QP_AIRLINES_FULL.includes(v)) document.getElementById('t-qpmode').value = '';
+  else if (QP_AIRLINES_PARTNER.includes(v)) document.getElementById('t-qpmode').value = 'pointsOnly';
+});
 
 document.getElementById('calc-range').addEventListener('change', (e) => { calcRange = e.target.value; renderFlightsNeeded(); });
 document.getElementById('calc-class').addEventListener('change', (e) => { calcClass = e.target.value; renderFlightsNeeded(); });

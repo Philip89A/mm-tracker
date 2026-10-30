@@ -127,6 +127,28 @@
       <label>Kreditkarten-Meilen-Tausch (nur in 5.000er-Schritten, max. 25.000/Jahr, 250 Meilen = 1 Point + 1 QP)</label>
       <input type="range" id="calc-cc-miles" min="0" max="25000" step="5000" value="0">
       <p class="hint" id="calc-cc-miles-hint" style="margin-top:2px;"></p>
+      <div class="subcard" id="levers-box" style="margin-top:14px;">
+        <label style="margin-top:0;">✅ Genutzte Hebel <span id="levers-year"></span></label>
+        <p class="hint" style="margin:2px 0 6px;">Tatsächlich durchgeführte Umtausche. Sie zählen als erzielte Points/QP und werden als Meilen-Abgang gebucht; die Simulation oben rechnet mit dem verbleibenden Kontingent.</p>
+        <div id="levers-list"></div>
+        <p class="hint" id="levers-quota" style="margin:8px 0;"></p>
+        <form id="lever-form">
+          <div class="row2">
+            <div>
+              <label style="margin-top:0;">Hebel</label>
+              <select id="lv-type">
+                <option value="cc">Kreditkarten-Meilentausch</option>
+                <option value="swap800">800-QP-Meilentausch</option>
+              </select>
+            </div>
+            <div><label style="margin-top:0;">Datum</label><input type="date" id="lv-date" required></div>
+          </div>
+          <label id="lv-miles-label">Getauschte Kreditkarten-Meilen (5.000er-Schritte, 250 Meilen = 1 P + 1 QP)</label>
+          <input type="number" id="lv-miles" min="1" step="1" placeholder="5000" required>
+          <button type="submit" class="btn small secondary" style="margin-top:8px;">Als genutzt verbuchen</button>
+        </form>
+        <p class="hint" id="lv-msg" style="margin:6px 0 0;"></p>
+      </div>
       <div id="flights-needed-list" style="margin-top:10px;"></div>
     </div>
 
@@ -250,6 +272,7 @@
         <option value="points">Punkte (hoch → niedrig)</option>
       </select>
       <p class="hint" id="trip-filter-note" style="margin:6px 0 0;"></p>
+      <p class="hint" id="trip-cost-summary" style="display:none; margin:10px 0 0;"></p>
       <p class="hint" id="trip-upgrade-summary" style="display:none; margin:10px 0 0;"></p>
       <div id="trip-list" style="margin-top:10px;"><div class="empty">Noch keine Trips erfasst.</div></div>
       <button type="button" class="btn secondary" style="margin-top:12px;" onclick="exportTripsCsv()">⬇️ Trip-Log als CSV exportieren</button>
@@ -310,6 +333,22 @@
           <option value="Air Canada"></option><option value="United"></option><option value="Singapore Airlines"></option>
           <option value="ANA"></option><option value="Thai Airways"></option><option value="Turkish Airlines"></option><option value="SAS"></option>
         </datalist>
+        <div class="row2">
+          <div>
+            <label>Sammelart</label>
+            <select id="t-qpmode">
+              <option value="">Lufthansa Group (Points + QP)</option>
+              <option value="pointsOnly">Partner (nur Points, keine QP)</option>
+            </select>
+          </div>
+          <div>
+            <label>Points manuell (optional)</label>
+            <input type="number" id="t-points-override" min="0" placeholder="aus Tabelle">
+          </div>
+        </div>
+        <p class="hint" style="margin:4px 0 0;">Bei Partner-Airlines gibt es Points, aber keine QP — und die Points stammen nicht aus der Lufthansa-Tabelle. Trag sie dann hier laut Abrechnung ein (Gesamtwert des Trips). Die Sammelart wird bei bekannten Airlines automatisch vorgeschlagen.</p>
+        <label>Preis gesamt (€, optional)</label>
+        <input type="number" id="t-cost" min="0" step="0.01" placeholder="0,00">
         <div class="row2">
           <div>
             <label>Upgrade von (optional)</label>
@@ -538,6 +577,7 @@
               <option value="Reise-Buchungsportale">Reise-Buchungsportale</option>
               <option value="Uptrip">Uptrip</option>
               <option value="Fremdprogramm-Umwandlung">Fremdprogramm-Umwandlung</option>
+              <option value="Statuspunkte-Tausch">Statuspunkte-Tausch (Hebel)</option>
               <option value="Kulanz/Sonstiges">Kulanz/Sonstiges</option>
             </select>
           </div>
