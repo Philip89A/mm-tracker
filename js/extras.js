@@ -342,6 +342,25 @@
       `<div style="display:flex; height:12px; border-radius:6px; overflow:hidden; margin-top:6px;">${Object.keys(clsLabel).filter(c => classes[c]).map(c => `<div style="width:${classes[c] / totalSeg * 100}%; background:${clsColor[c]};" title="${clsLabel[c]}"></div>`).join('')}</div>
        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:6px; font-size:11.5px; color:var(--muted);">${Object.keys(clsLabel).filter(c => classes[c]).map(c => `<span><span style="display:inline-block; width:9px; height:9px; border-radius:50%; background:${clsColor[c]}; margin-right:4px;"></span>${clsLabel[c]} ${Math.round(classes[c] / totalSeg * 100)} %</span>`).join('')}</div>`);
 
+    // Flugzeuge & Sitze: nur Teilstrecken, für die Details hinterlegt sind
+    const legInfos = flown.flatMap(tripFlightInfos);
+    const tally = (key, norm = x => x) => {
+      const m = new Map();
+      legInfos.forEach(f => { const v = norm((f[key] || '').trim()); if (v) m.set(v, (m.get(v) || 0) + 1); });
+      return m;
+    };
+    if (legInfos.length) {
+      const types = tally('aircraft'), tails = tally('registration'), seats = tally('seat');
+      const letters = tally('seat', s => (s.match(/[A-Z]$/) || [''])[0]);
+      const rep = new Map([...tails].filter(([, n]) => n > 1));
+      const asBars = (m, n) => bars(top(m, n).map(([k, v]) => ({ label: k, value: v, text: v + '×' })), '');
+      html += `<p class="hint" style="margin:16px 0 0;"><b>Flugzeuge &amp; Sitze</b> — Basis: ${legInfos.length} Teilstrecken mit hinterlegten Flugdetails.</p>`;
+      html += block('Flugzeugtypen', asBars(types, 6));
+      html += block('Kennzeichen (am häufigsten)', rep.size ? asBars(rep, 5) : (tails.size ? '<div class="hint" style="margin:4px 0 0;">Noch kein Flugzeug mehrfach geflogen.</div>' : ''));
+      html += block('Sitzplätze (am häufigsten)', asBars(seats, 5));
+      html += block('Sitzbuchstaben', asBars(letters, 6));
+    }
+
     // Je Jahr: alle geflogenen Trips, unabhängig vom Jahresfilter
     const byYear = {};
     trips.filter(t => !t.planned && t.date).forEach(t => {
@@ -414,7 +433,7 @@
   function sameLegAlreadyInTool(f) {
     const day = new Date(f.date).getTime();
     return trips.some(t => {
-      if (t.flightInfo && t.flightInfo.flightNo === f.flightNo && t.date === f.date) return true;
+      if (t.date === f.date && tripFlightInfos(t).some(x => x.flightNo === f.flightNo)) return true;
       if (Math.abs(new Date(t.date).getTime() - day) > 14 * 86400000) return false;
       const codes = (String(t.route || '').split(/[\s\-–—→>\/,;]+/)).filter(c => /^[A-Z]{3}$/.test(c));
       for (let i = 0; i < codes.length - 1; i++) if (codes[i] === f.from && codes[i + 1] === f.to) return true;
@@ -441,7 +460,7 @@
           id: genId(), date: f.date, route: `${f.from}–${f.to}`, range: 'continental', cls: IMPORT_CLASS[f.cabin] || 'economy',
           segments: 1, co2: 0, note: 'Archivflug (Flighty-Import)', historical: false, planned: false, airline: f.airline || '',
           upgradeFrom: '', upgradeCost: 0, qpMode: '', noPoints: true, pointsOverride: 0, cost: 0,
-          flightInfo: { flightNo: f.flightNo, duration: f.duration, aircraft: f.aircraft, registration: f.registration, cabin: f.cabin || '', seat: f.seat || '' }
+          flightInfo: [{ flightNo: f.flightNo, from: f.from, to: f.to, duration: f.duration, aircraft: f.aircraft, registration: f.registration, cabin: f.cabin || '', seat: f.seat || '' }]
         });
       });
       await saveTrips();

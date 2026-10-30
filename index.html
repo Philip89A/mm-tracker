@@ -216,10 +216,11 @@
 
     <div class="card" data-card="fristen">
       <h2>⏰ Fristen & Ablaufdaten <span class="badge" id="fristen-count">0</span></h2>
+      <p class="hint" style="margin-top:0;">Sammelt alle Ablaufdaten an einer Stelle: eigene Fristen und die offenen <b>Gutscheine</b> (die du unter „Gutscheine &amp; Benefits“ verwaltest). Eine lose Frist kannst du mit einem Klick zum Gutschein machen.</p>
       <div id="fristen-list"><div class="empty">Keine Fristen erfasst.</div></div>
       <form id="fristen-form" style="margin-top:10px;">
         <div class="row2">
-          <div><label>Titel</label><input type="text" id="fr-title" placeholder="z.B. eVoucher" required></div>
+          <div><label>Titel</label><input type="text" id="fr-title" placeholder="z.B. Meilenverfall, Kartengebühr" required></div>
           <div><label>Läuft ab am</label><input type="date" id="fr-date" required></div>
         </div>
         <label>Notiz</label>
@@ -406,6 +407,15 @@
           <input type="checkbox" id="t-nopoints" style="width:auto;">
           Nur Flugdaten (keine Punkte berechnen, z.B. Archivflug)
         </label>
+        <details id="t-flights-details" style="margin-top:12px;">
+          <summary style="cursor:pointer; font-weight:600; color:var(--navy);">✈️ Flugdetails je Teilstrecke (optional)</summary>
+          <p class="hint" style="margin:6px 0;">Flugnummer, Flugzeugtyp, Kennzeichen, Sitz und Kabine — für die Statistik zu Flugzeugen und Sitzplätzen. Pro Teilstrecke eine Zeile.</p>
+          <div id="t-flights-rows"></div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+            <button type="button" class="btn secondary small" id="t-flights-add">+ Teilstrecke</button>
+            <button type="button" class="btn secondary small" id="t-flights-fill">Aus Strecke vorbelegen</button>
+          </div>
+        </details>
         <label>Preis gesamt (€, optional)</label>
         <input type="number" id="t-cost" min="0" step="0.01" placeholder="0,00">
         <div class="row2">

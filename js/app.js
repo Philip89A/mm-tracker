@@ -806,7 +806,7 @@ function renderTrips() {
           ${t.historical ? `<div class="meta"><span class="tag mid">🕰️ Historisch — nicht in Gesamtsumme</span></div>` : ''}
           ${t.planned ? `<div class="meta"><span class="tag ok">📅 Geplant</span></div>` : ''}
           ${t.noPoints ? `<div class="meta"><span class="tag mid">ℹ️ nur Flugdaten — keine Punkte berechnet</span></div>` : ''}
-          ${t.flightInfo ? `<div class="meta">✈️ ${escHtml([t.flightInfo.flightNo, t.flightInfo.aircraft, t.flightInfo.registration, t.flightInfo.seat ? 'Sitz ' + t.flightInfo.seat : '', t.flightInfo.cabin ? 'Kabine ' + t.flightInfo.cabin : '', t.flightInfo.duration].filter(Boolean).join(' · '))}</div>` : ''}
+          ${tripFlightInfos(t).map(f => `<div class="meta">✈️ ${escHtml(flightInfoText(f))}</div>`).join('')}
           ${tripUpgradeDeltaQP(t) > 0 ? `<div class="meta">⬆️ Upgrade von ${labelClass(t.upgradeFrom)}${t.upgradeCost > 0 ? ': ' + t.upgradeCost.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' € für +' + tripUpgradeDeltaQP(t) + ' QP (' + (t.upgradeCost / tripUpgradeDeltaQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP)' : ''}</div>` : ''}
           ${t.note ? `<div class="meta">📝 ${escHtml(t.note)}</div>` : ''}
         </div>
@@ -1098,19 +1098,41 @@ window.togglePastPromos = function() {
 
 function renderFristen() {
   const list = document.getElementById('fristen-list');
-  document.getElementById('fristen-count').textContent = fristen.length;
-  if (fristen.length === 0) {
+  // Offene Gutscheine mit Ablaufdatum laufen hier mit, damit es nur eine Fristen-Übersicht gibt.
+  const voucherItems = vouchers.filter(v => !v.used && v.expires).map(v => ({ voucher: v, date: v.expires }));
+  const items = [...fristen.map(f => ({ frist: f, date: f.date })), ...voucherItems].sort((a, b) => new Date(a.date) - new Date(b.date));
+  document.getElementById('fristen-count').textContent = items.length;
+  if (items.length === 0) {
     list.innerHTML = '<div class="empty">Keine Fristen erfasst.</div>';
     return;
   }
-  const sorted = [...fristen].sort((a, b) => new Date(a.date) - new Date(b.date));
-  list.innerHTML = sorted.map(f => {
-    const idx = fristen.indexOf(f);
-    const days = daysUntil(f.date);
+  list.innerHTML = items.map(it => {
+    const days = daysUntil(it.date);
     let tagClass = 'ok', tagText = `${days} Tage`;
     if (days < 0) { tagClass = 'low'; tagText = 'abgelaufen'; }
     else if (days <= 30) { tagClass = 'low'; tagText = `noch ${days} Tage!`; }
     else if (days <= 90) { tagClass = 'mid'; tagText = `noch ${days} Tage`; }
+    if (it.voucher) {
+      const v = it.voucher, call = `'${v.id}'`;
+      return `<div class="trip">
+      <div class="top">
+        <div>
+          <div class="route">🎟️ ${escHtml(v.title)}</div>
+          <div class="meta">Gutschein · läuft ab: ${escHtml(v.expires)}</div>
+          ${v.note ? `<div class="meta">📝 ${escHtml(v.note)}</div>` : ''}
+        </div>
+        <div class="pts"><span class="tag ${tagClass}">${tagText}</span></div>
+      </div>
+      <div class="flex-between" style="margin-top:6px; gap:6px; flex-wrap:wrap;">
+        <span class="hint" style="margin:0;">verwaltet unter „Gutscheine &amp; Benefits“</span>
+        <span style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button type="button" class="btn small secondary" onclick="voucherIcs(${call})">📅 Kalender</button>
+          <button type="button" class="btn small" style="background:var(--green); color:white;" onclick="markVoucherUsed(${call})">✅ Eingelöst</button>
+        </span>
+      </div>
+    </div>`;
+    }
+    const f = it.frist, idx = fristen.indexOf(f);
     return `<div class="trip">
       <div class="top">
         <div>
@@ -1120,13 +1142,29 @@ function renderFristen() {
         </div>
         <div class="pts"><span class="tag ${tagClass}">${tagText}</span></div>
       </div>
-      <div class="flex-between" style="margin-top:6px;">
+      <div class="flex-between" style="margin-top:6px; gap:6px; flex-wrap:wrap;">
         <button class="del" onclick="deleteFristen(${idx})">entfernen</button>
-        <button type="button" class="btn small secondary" onclick="downloadFristIcs(${idx})">📅 Zu Kalender hinzufügen</button>
+        <span style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button type="button" class="btn small secondary" onclick="fristToVoucher(${idx})">🎟️ Als Gutschein führen</button>
+          <button type="button" class="btn small secondary" onclick="downloadFristIcs(${idx})">📅 Kalender</button>
+        </span>
       </div>
     </div>`;
   }).join('');
 }
+
+// Macht aus einer losen Frist (z.B. „eVoucher“) einen Gutschein — dann gibt es Einlösen-Status und Hinweise an einer Stelle.
+window.fristToVoucher = async function(idx) {
+  const f = fristen[idx];
+  if (!f) return;
+  if (!confirm(`„${f.title}“ (läuft ab ${f.date}) als Gutschein führen?\n\nDie Frist wird dabei aus der Fristen-Liste entfernt und erscheint weiter hier, jetzt mit Einlösen-Status.`)) return;
+  const type = /e-?voucher/i.test(f.title) ? 'evoucher' : /upgrade/i.test(f.title) ? 'upgrade' : /lounge/i.test(f.title) ? 'lounge' : 'other';
+  vouchers.push({ id: genId(), type, title: f.title, expires: f.date, note: f.note || '', used: false, usedDate: null, createdAt: new Date().toISOString().slice(0, 10) });
+  fristen.splice(idx, 1);
+  await saveVouchers();
+  await saveFristen();
+  render();
+};
 
 function icsEscape(s) {
   return String(s || '').replace(/([,;])/g, '\\$1').replace(/\n/g, '\\n');
@@ -1860,6 +1898,70 @@ document.getElementById('dash-customize-btn').addEventListener('click', () => to
 
 let editingTripId = null;
 
+// ---------- Flugdetails je Teilstrecke (Flugnummer, Flugzeug, Kennzeichen, Sitz …) ----------
+
+const CABIN_LABELS = { E: 'Economy', W: 'Premium Eco.', B: 'Business', F: 'First' };
+
+// Liefert die Flugdetails eines Trips immer als Liste. Ältere Importe haben ein einzelnes Objekt.
+function tripFlightInfos(t) {
+  const fi = t.flightInfo;
+  if (Array.isArray(fi)) return fi;
+  if (!fi) return [];
+  const r = parseRoute(t.route);
+  const single = r.known.length === 2 && !r.unknown.length;
+  return [{ from: single ? r.known[0] : '', to: single ? r.known[1] : '', ...fi }];
+}
+
+function flightInfoText(f) {
+  return [f.flightNo, (f.from && f.to) ? `${f.from}–${f.to}` : '', f.aircraft, f.registration, f.seat ? 'Sitz ' + f.seat : '',
+    f.cabin ? (CABIN_LABELS[f.cabin] || f.cabin) : '', f.duration].filter(Boolean).join(' · ');
+}
+
+const FLIGHT_ROW_FIELDS = [
+  ['flightNo', 'Flugnr.', 'LH 1418'], ['from', 'Von', 'FRA'], ['to', 'Nach', 'OTP'], ['duration', 'Dauer', '2h 16m'],
+  ['aircraft', 'Flugzeugtyp', 'A320'], ['registration', 'Kennzeichen', 'D-AIWA'], ['seat', 'Sitz', '15A']
+];
+
+function addFlightRow(data = {}) {
+  const row = document.createElement('div');
+  row.className = 'flight-row';
+  row.innerHTML = `<div class="flight-row-grid">${FLIGHT_ROW_FIELDS.map(([k, label, ph]) =>
+      `<div><label>${label}</label><input type="text" data-f="${k}" placeholder="${ph}" autocomplete="off" value="${escHtml(data[k] || '')}"></div>`).join('')}
+      <div><label>Kabine</label><select data-f="cabin"><option value="">–</option>${Object.entries(CABIN_LABELS).map(([k, v]) => `<option value="${k}"${data.cabin === k ? ' selected' : ''}>${v}</option>`).join('')}</select></div>
+    </div><button type="button" class="btn secondary flight-row-del">Teilstrecke entfernen</button>`;
+  row.querySelector('.flight-row-del').addEventListener('click', () => row.remove());
+  document.getElementById('t-flights-rows').appendChild(row);
+}
+
+function clearFlightRows() { document.getElementById('t-flights-rows').innerHTML = ''; }
+
+function loadFlightRows(list) {
+  clearFlightRows();
+  list.forEach(addFlightRow);
+  document.getElementById('t-flights-details').open = list.length > 0;
+}
+
+function readFlightRows() {
+  return [...document.querySelectorAll('#t-flights-rows .flight-row')].map(row => {
+    const f = {};
+    row.querySelectorAll('[data-f]').forEach(el => { f[el.dataset.f] = el.value.trim(); });
+    ['from', 'to', 'registration'].forEach(k => { f[k] = f[k].toUpperCase(); });
+    f.flightNo = f.flightNo.replace(/\s+/g, '').toUpperCase();
+    f.aircraft = f.aircraft.toUpperCase();
+    f.seat = f.seat.toUpperCase();
+    return f;
+  }).filter(f => Object.values(f).some(Boolean));
+}
+
+document.getElementById('t-flights-add').addEventListener('click', () => addFlightRow());
+// Eine Zeile je Teilstrecke der Strecke anlegen (FRA–OTP–FRA → FRA–OTP, OTP–FRA)
+document.getElementById('t-flights-fill').addEventListener('click', () => {
+  const tokens = String(document.getElementById('t-route').value).split(/[\s\-–—→>\/,;]+/).filter(c => /^[A-Z]{3}$/.test(c));
+  if (tokens.length < 2) return;
+  for (let i = 0; i < tokens.length - 1; i++) addFlightRow({ from: tokens[i], to: tokens[i + 1] });
+  document.getElementById('t-flights-details').open = true;
+});
+
 window.startEditTrip = function(idx) {
   const t = trips[idx];
   if (!t) return;
@@ -1878,6 +1980,7 @@ window.startEditTrip = function(idx) {
   document.getElementById('t-upgrade-cost').value = t.upgradeCost || '';
   document.getElementById('t-qpmode').value = t.qpMode || '';
   document.getElementById('t-nopoints').checked = !!t.noPoints;
+  loadFlightRows(tripFlightInfos(t));
   document.getElementById('t-points-override').value = t.pointsOverride || '';
   document.getElementById('t-cost').value = t.cost || '';
   const linkedMiles = milesLog.filter(mv => mv.sourceTripId === t.id);
@@ -1894,6 +1997,7 @@ window.cancelEditTrip = function() {
   editingTripId = null;
   document.getElementById('trip-form').reset();
   document.getElementById('t-segments').value = 2;
+  loadFlightRows([]);
   document.getElementById('trip-submit-btn').textContent = 'Trip speichern';
   document.getElementById('trip-cancel-btn').style.display = 'none';
 };
@@ -1918,8 +2022,7 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     upgradeCost: parseFloat(document.getElementById('t-upgrade-cost').value) || 0,
     qpMode: document.getElementById('t-qpmode').value,
     noPoints: document.getElementById('t-nopoints').checked,
-    // Flugdetails aus dem Archiv-Import bleiben beim Bearbeiten erhalten
-    flightInfo: (trips.find(x => x.id === tripId) || {}).flightInfo,
+    flightInfo: readFlightRows(),
     pointsOverride: parseInt(document.getElementById('t-points-override').value) || 0,
     cost: parseFloat(document.getElementById('t-cost').value) || 0
   };
