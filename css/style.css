@@ -369,3 +369,13 @@ nav.tabbar button.active { color: var(--navy); font-weight: 700; }
 /* Streckenplaner: Flughafen-Vorschläge */
 .sug { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
 .sug-btn { text-align: left; background: var(--gray-bg); border: 1px solid var(--gray-border); border-radius: 8px; padding: 6px 8px; font-size: 12.5px; color: var(--navy); cursor: pointer; }
+
+/* Jahresvergleich: gestapelte Balken (erzielt / geplant / historisch) */
+.year-stack { width: 22px; display: flex; flex-direction: column-reverse; position: relative; }
+.year-seg { width: 100%; }
+.year-seg.p { background: linear-gradient(180deg, var(--gold-light), var(--gold)); }
+.year-seg.q { background: linear-gradient(180deg, #6fa8dc, var(--navy2)); }
+.year-seg.planned { opacity: 0.35; }
+.year-seg.hist { background: #adb5bd; }
+.year-stack > .year-seg:last-of-type { border-radius: 4px 4px 0 0; }
+.year-sub { font-size: 9.5px; color: var(--muted); text-align: center; margin-top: 2px; line-height: 1.3; max-width: 64px; }

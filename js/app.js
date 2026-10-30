@@ -819,49 +819,69 @@ function renderTrips() {
   }).join('');
 }
 
+// Jahresvergleich: dieselbe Zählweise wie Dashboard, Kontoabgleich und Archiv
+// (computeAchievedTotals je Jahr: Trips, Hotels, Uptrip, Hebel, Boden-Punkte und
+// im laufenden Jahr der Basiswert). Geplantes steht hell darüber, historische
+// Trips (die bewusst nicht ins Dashboard zählen) grau — so widersprechen sich
+// Diagramm und Dashboard nicht mehr.
 function renderYearChart() {
   const el = document.getElementById('year-chart');
-  const byYear = {};
-  trips.forEach(t => {
-    if (!t.date) return;
-    const y = t.date.slice(0, 4);
-    byYear[y] = byYear[y] || { p: 0, q: 0 };
-    byYear[y].p += tripPoints(t);
-    byYear[y].q += tripQP(t);
-  });
-  Object.entries(groundByYear).forEach(([y, g]) => {
-    if (!(g.points > 0) && !(g.qp > 0)) return;
-    byYear[y] = byYear[y] || { p: 0, q: 0 };
-    byYear[y].p += g.points || 0;
-    byYear[y].q += g.qp || 0;
-  });
+  const yearSet = new Set([currentProgramYear()]);
+  const addYear = d => { const y = (d || '').slice(0, 4); if (/^\d{4}$/.test(y)) yearSet.add(y); };
+  trips.forEach(t => addYear(t.date));
+  plannedHotels.forEach(h => addYear(h.dateFrom));
+  levers.forEach(l => addYear(l.date));
+  uptripItems.forEach(u => (u.redemptionDates || []).forEach(addYear));
+  Object.keys(groundByYear).forEach(y => { const g = groundByYear[y]; if (g && (g.points || g.qp)) yearSet.add(y); });
 
-  const years = Object.keys(byYear).sort();
+  const data = {};
+  [...yearSet].forEach(y => {
+    const ach = computeAchievedTotals(y), pl = computePlannedDelta(y);
+    let hp = 0, hq = 0;
+    trips.forEach(t => { if (t.historical && !t.planned && (t.date || '').startsWith(y)) { hp += tripPoints(t); hq += tripQP(t); } });
+    data[y] = { p: ach.p, q: ach.q, pp: pl.p, pq: pl.q, hp, hq };
+  });
+  const years = Object.keys(data).filter(y => data[y].p || data[y].q || data[y].pp || data[y].pq || data[y].hp || data[y].hq).sort();
   if (years.length === 0) {
-    el.innerHTML = '<div class="empty">Noch keine Trips erfasst — das Diagramm erscheint, sobald Daten vorhanden sind.</div>';
+    el.innerHTML = '<div class="empty">Noch keine Daten — das Diagramm erscheint, sobald Trips vorhanden sind.</div>';
     return;
   }
-  const maxVal = Math.max(1, ...years.map(y => Math.max(byYear[y].p, byYear[y].q)));
+  const total = (d, k) => d[k] + d['p' + k] + d['h' + k];
+  const maxVal = Math.max(1, ...years.map(y => Math.max(total(data[y], 'p'), total(data[y], 'q'))));
+  const H = 140;
+  const h = v => Math.round((v / maxVal) * H);
+  const f = n => n.toLocaleString('de-DE');
+
+  const stack = (cls, a, pl, hist) => {
+    const parts = [];
+    if (a > 0) parts.push(`<div class="year-seg ${cls}" style="height:${Math.max(2, h(a))}px;"></div>`);
+    if (pl > 0) parts.push(`<div class="year-seg ${cls} planned" style="height:${Math.max(2, h(pl))}px;"></div>`);
+    if (hist > 0) parts.push(`<div class="year-seg hist" style="height:${Math.max(2, h(hist))}px;"></div>`);
+    if (!parts.length) parts.push('<div class="year-seg" style="height:2px; background:var(--gray-border);"></div>');
+    const topLabel = f(a);
+    return `<div class="year-stack">${parts.join('')}<span class="year-bar-val">${topLabel}</span></div>`;
+  };
 
   const cols = years.map(y => {
-    const pH = Math.max(2, Math.round((byYear[y].p / maxVal) * 140));
-    const qH = Math.max(2, Math.round((byYear[y].q / maxVal) * 140));
-    return `<div class="year-col">
-      <div class="year-bars">
-        <div class="year-bar p" style="height:${pH}px;"><span class="year-bar-val">${byYear[y].p.toLocaleString('de-DE')}</span></div>
-        <div class="year-bar q" style="height:${qH}px;"><span class="year-bar-val">${byYear[y].q.toLocaleString('de-DE')}</span></div>
-      </div>
+    const d = data[y];
+    const notes = [];
+    if (d.pp > 0 || d.pq > 0) notes.push(`+${f(d.pp)}/${f(d.pq)} geplant`);
+    if (d.hp > 0 || d.hq > 0) notes.push(`+${f(d.hp)}/${f(d.hq)} hist.`);
+    return `<div class="year-col" title="${y}: erzielt ${f(d.p)} Points / ${f(d.q)} QP${notes.length ? ' · ' + notes.join(' · ') : ''}">
+      <div class="year-bars">${stack('p', d.p, d.pp, d.hp)}${stack('q', d.q, d.pq, d.hq)}</div>
       <div class="year-label">${y}</div>
+      <div class="year-sub">${notes.join('<br>')}</div>
     </div>`;
   }).join('');
 
   el.innerHTML = `<div class="year-chart">${cols}</div>
     <div class="year-legend">
-      <span><span class="dot" style="background:var(--gold);"></span>Points</span>
-      <span><span class="dot" style="background:var(--navy2);"></span>Qualifying Points</span>
+      <span><span class="dot" style="background:var(--gold);"></span>Points (erzielt)</span>
+      <span><span class="dot" style="background:var(--navy2);"></span>QP (erzielt)</span>
+      <span><span class="dot" style="background:var(--gold); opacity:0.35;"></span>geplant</span>
+      <span><span class="dot" style="background:#adb5bd;"></span>historisch</span>
     </div>`;
 }
-
 // Zeigt, wie viele zusätzliche Flug-Segmente (kontinental, 4 Profile) bis
 // zum jeweils nächsten noch offenen Ziel nötig sind — Basis ist der Stand
 // INKLUSIVE bereits geplanter Flüge/Hotelaufenthalte, da diese ja schon
