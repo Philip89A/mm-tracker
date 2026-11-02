@@ -511,9 +511,11 @@ function seasonYearOptions() {
 
 function renderSeasonSwitch() {
   const sy = seasonYear(), cy = currentProgramYear();
-  document.getElementById('season-switch').innerHTML = seasonYearOptions().map(y =>
-    `<button type="button" class="goal-tab${String(y) === sy ? ' active' : ''}" onclick="setSeasonYear(${y})">${y}${String(y) === cy ? ' · jetzt' : ''}</button>`
-  ).join('');
+  // Dropdown statt Tab-Leiste: mit vielen Jahren sprengt die Leiste sonst die Kartenbreite.
+  document.getElementById('season-switch').innerHTML = `<select id="season-select" aria-label="Saisonjahr" onchange="setSeasonYear(Number(this.value))">` +
+    [...seasonYearOptions()].reverse().map(y =>
+      `<option value="${y}"${String(y) === sy ? ' selected' : ''}>${y}${String(y) === cy ? ' · laufendes Jahr' : ''}</option>`
+    ).join('') + '</select>';
   const hint = document.getElementById('season-hint');
   if (sy === cy) hint.textContent = '';
   else if (sy > cy) hint.textContent = `Vorschau ${sy}: Es zählen Trips, Hotels und Uptrip-Einlösungen mit Datum ${sy} plus deine Boden-Punkte. Die Basiswerte gelten nur fürs laufende Jahr.`;

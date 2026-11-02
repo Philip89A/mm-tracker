@@ -384,3 +384,7 @@ nav.tabbar button.active { color: var(--navy); font-weight: 700; }
 .flight-row-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 10px; }
 .flight-row-grid label { margin-top: 8px; font-size: 11.5px; }
 .flight-row .flight-row-del { width: auto; margin-top: 8px; padding: 5px 10px; font-size: 12px; }
+
+/* Saisonjahr-Auswahl im Dashboard */
+.season-switch { margin-bottom: 14px; }
+.season-switch select { width: 100%; max-width: 100%; margin-top: 0; font-weight: 700; color: var(--navy); }
