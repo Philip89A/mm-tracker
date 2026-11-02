@@ -572,6 +572,20 @@ function renderTracker() {
       const profile = `${calcRange === 'continental' ? 'kontinental' : 'interkontinental'} ${labelClass(calcClass)}`;
       lines.push(`Noch ${daysLeft} Tage: offen ${fmt(rem)} ${unit} → ca. ${fmt(rem / weeks)} pro Woche, ≈ ${(rem / perSeg / months).toLocaleString('de-DE', { maximumFractionDigits: 1 })} Segmente pro Monat (${profile}, Einstellung in der Prognose-Karte).`);
       if (projRem < rem) lines.push(`Mit bereits Geplantem noch offen: ${fmt(projRem)} ${unit}${projRem === 0 ? ' — Ziel damit erreichbar ✅' : ''}.`);
+      // Hochrechnung aus dem bisherigen Tempo seit Jahresbeginn
+      if (ist > 0) {
+        const perDay = ist / day, daysNeed = rem / perDay;
+        lines.push(daysNeed <= daysLeft
+          ? `Bei bisherigem Tempo (${fmt(perDay * 30.4)} ${unit}/Monat) wird das Ziel voraussichtlich am ${new Date(now.getTime() + daysNeed * 86400000).toLocaleDateString('de-DE')} erreicht.`
+          : `Bei bisherigem Tempo (${fmt(perDay * 30.4)} ${unit}/Monat) reicht es nicht: Hochrechnung zum Jahresende ${fmt(perDay * daysTotal)} von ${fmt(target)} ${unit}.`);
+      }
+      // Der nächste geplante Flug und was er fürs Ziel bringt
+      const todayStr = now.toISOString().slice(0, 10);
+      const nextPlanned = trips.filter(t => t.planned && t.date >= todayStr && t.date.startsWith(sy)).sort((a, b) => a.date.localeCompare(b.date))[0];
+      if (nextPlanned) {
+        const gain = bindP ? tripPoints(nextPlanned) : tripQP(nextPlanned);
+        if (gain > 0) lines.push(`Nächster geplanter Flug: ${nextPlanned.date.split('-').reverse().join('.')} ${escHtml(nextPlanned.route)} bringt +${fmt(gain)} ${unit} → danach noch ${fmt(Math.max(0, rem - gain))} offen.`);
+      }
     } else lines.push(`Das Jahr ist zu Ende — offen geblieben: ${fmt(rem)} ${unit}.`);
   } else if (sy > cy) lines.push(`Vorschau: ${sy} hat noch nicht begonnen.`);
   else lines.push(`Rückblick: ${sy} ist abgeschlossen.`);
@@ -712,6 +726,8 @@ function populateTripFilters() {
     (trips.some(t => !(t.airline || '').trim()) ? '<option value="__none">(ohne Angabe)</option>' : ''));
   const airports = [...new Set(trips.flatMap(tripAirportCodes))].sort();
   fill('tf-airport', '<option value="">Alle</option>' + airports.map(c => `<option value="${c}">${c} · ${escHtml(AIRPORTS[c][2])}</option>`).join(''));
+  const types = [...new Set(trips.flatMap(tripFlightInfos).map(f => (f.aircraft || '').trim().toUpperCase()).filter(Boolean))].sort();
+  fill('tf-aircraft', '<option value="">Alle</option>' + types.map(a => `<option value="${escHtml(a)}">${escHtml(a)}</option>`).join(''));
 }
 
 function getFilteredTrips() {
@@ -719,11 +735,15 @@ function getFilteredTrips() {
   const st = document.getElementById('tf-status').value;
   const al = document.getElementById('tf-airline').value;
   const ap = document.getElementById('tf-airport').value;
+  const ac = document.getElementById('tf-aircraft').value;
+  const q = document.getElementById('tf-search').value.trim().toUpperCase().replace(/\s+/g, '');
   return trips.filter(t =>
     (!y || (t.date || '').startsWith(y)) &&
     (!st || (st === 'planned' ? !!t.planned : !t.planned)) &&
     (!al || (al === '__none' ? !(t.airline || '').trim() : (t.airline || '').trim() === al)) &&
-    (!ap || tripAirportCodes(t).includes(ap))
+    (!ap || tripAirportCodes(t).includes(ap)) &&
+    (!ac || tripFlightInfos(t).some(f => (f.aircraft || '').trim().toUpperCase() === ac)) &&
+    (!q || tripFlightInfos(t).some(f => [f.flightNo, f.registration, f.seat].some(v => String(v || '').toUpperCase().replace(/\s+/g, '').includes(q))))
   );
 }
 
@@ -2312,10 +2332,12 @@ document.getElementById('mi-category').addEventListener('change', () => {
 
 document.getElementById('mi-filter-category').addEventListener('change', renderMiles);
 document.getElementById('mi-filter-year').addEventListener('change', renderMiles);
-['tf-year', 'tf-status', 'tf-airline', 'tf-airport'].forEach(id => document.getElementById(id).addEventListener('change', () => {
+const refreshTripFilters = () => {
   renderTrips();
   if (typeof renderRouteMap === 'function') renderRouteMap();
-}));
+};
+['tf-year', 'tf-status', 'tf-airline', 'tf-airport', 'tf-aircraft'].forEach(id => document.getElementById(id).addEventListener('change', refreshTripFilters));
+document.getElementById('tf-search').addEventListener('input', refreshTripFilters);
 document.getElementById('trip-sort').addEventListener('change', renderTrips);
 
 // Bei eindeutig bekannten Airlines die Sammelart vorschlagen (bleibt änderbar).

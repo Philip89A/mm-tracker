@@ -191,12 +191,16 @@
   // m = Zeitfenster [Monat von, Monat bis]; always = gilt ganzjährig und erscheint nur,
   // solange auto() nicht erfüllt ist; auto() = erkennt die App den Punkt selbst als erledigt.
   const reconciledIn = (year, month) => reconcileLog.some(r => (r.date || '').startsWith(`${year}-${pad(month)}`));
+  let pushActive = false; // von renderPushStatus gesetzt: Push ist auf diesem Gerät aktiv
+  const flightDetailsDone = (year) => trips.filter(t => !t.planned && (t.date || '').startsWith(String(year))).every(t => tripFlightInfos(t).length > 0);
   const YEAR_TASKS = [
     { id: 'close_prev', m: [1, 3], title: 'Vorjahr abschließen (Jahres-Archiv)', hint: 'Dashboard → Jahres-Archiv, sobald Miles & More den Status fürs neue Jahr gesetzt hat.',
       auto: y => yearArchive.some(a => a.year === String(y - 1)) },
     { id: 'reset_base', m: [1, 3], title: 'Basiswerte aufs neue Jahr setzen und mit dem Konto abgleichen', hint: 'Points/QP starten neu; Karte „Kontoabgleich“ nutzen.' },
     { id: 'season_goal', m: [1, 2], title: 'Zielstatus für dieses Jahr festlegen', hint: 'Zielschalter im Dashboard, ggf. Boden-Punkte eintragen.' },
     { id: 'vouchers_in', m: [1, 3], title: 'Neue Gutscheine und Benefits aus dem Konto eintragen', hint: 'Karte „Gutscheine & Benefits“.' },
+    { id: 'flight_details', m: [1, 2], title: 'Flugdetails des Vorjahres nachtragen (Flugzeug, Kennzeichen, Sitz)', hint: 'Trip-Formular → „Flugdetails je Teilstrecke“ oder Mehr → Archivflüge importieren. Speist die Flugzeug- und Sitz-Statistik.',
+      auto: y => flightDetailsDone(y - 1) },
     { id: 'status_valid', m: [2, 3], title: 'Statusgültigkeit im Konto prüfen und als Frist eintragen', hint: 'Karte „Fristen & Ablaufdaten“.' },
     { id: 'recon_q1', m: [3, 3], title: 'Kontoabgleich zum Quartalsende (Q1)', auto: y => reconciledIn(y, 3) },
     { id: 'recon_q2', m: [6, 6], title: 'Kontoabgleich zum Quartalsende (Q2)', auto: y => reconciledIn(y, 6) },
@@ -216,6 +220,7 @@
       auto: y => !plannedHotels.some(h => h.planned !== false && (h.dateFrom || '') < today() && (h.dateFrom || '').startsWith(String(y))) },
     { id: 'recon_q4', m: [12, 12], title: 'Kontoabgleich zum Jahresende', auto: y => reconciledIn(y, 12) },
     { id: 'recon_30', always: true, title: 'Kontoabgleich ist älter als 30 Tage', hint: 'Karte „Kontoabgleich“.', auto: () => daysSinceLastReconcile() <= 30 },
+    { id: 'push_on', always: true, title: 'Push-Erinnerungen für Fristen und Gutscheine auf dem Handy aktivieren', hint: 'Mehr → Benachrichtigungen (auf dem iPhone zuerst zum Home-Bildschirm hinzufügen).', auto: () => pushActive },
     { id: 'backup_30', always: true, title: 'Backup ist älter als 30 Tage', hint: 'Mehr → Backup exportieren.',
       auto: () => !!settings.lastBackup && Math.floor((Date.now() - new Date(settings.lastBackup)) / 86400000) <= 30 }
   ];
@@ -355,7 +360,18 @@
       const rep = new Map([...tails].filter(([, n]) => n > 1));
       const asBars = (m, n) => bars(top(m, n).map(([k, v]) => ({ label: k, value: v, text: v + '×' })), '');
       html += `<p class="hint" style="margin:16px 0 0;"><b>Flugzeuge &amp; Sitze</b> — Basis: ${legInfos.length} Teilstrecken mit hinterlegten Flugdetails.</p>`;
+      // Flugzeit aus den Dauern („2h 16m“), Lieblingsmaschine und Zahl verschiedener Flugzeuge
+      const minutes = (s) => { const h = /(\d+)\s*h/.exec(s || ''), m = /(\d+)\s*m/.exec(s || ''); return (h ? +h[1] * 60 : 0) + (m ? +m[1] : 0); };
+      const withDur = legInfos.filter(f => minutes(f.duration) > 0);
+      const airMin = withDur.reduce((s, f) => s + minutes(f.duration), 0);
+      const favTail = top(tails, 1)[0];
+      const facts2 = [];
+      if (withDur.length) facts2.push(`Flugzeit gesamt: ${Math.floor(airMin / 60)} h ${String(airMin % 60).padStart(2, '0')} min auf ${withDur.length} Teilstrecken (Ø ${Math.round(airMin / withDur.length)} min)`);
+      if (tails.size) facts2.push(`${tails.size} verschiedene Flugzeuge${favTail && favTail[1] > 1 ? ` · Lieblingsmaschine ${favTail[0]} (${favTail[1]}×)` : ''}`);
+      if (facts2.length) html += `<p class="hint" style="margin:4px 0 0;">${facts2.join('<br>')}</p>`;
+      const cabins = tally('cabin', c => ({ E: 'Economy', W: 'Premium Eco.', B: 'Business', F: 'First' }[c] || c));
       html += block('Flugzeugtypen', asBars(types, 6));
+      html += block('Kabine laut Flugdaten', asBars(cabins, 4));
       html += block('Kennzeichen (am häufigsten)', rep.size ? asBars(rep, 5) : (tails.size ? '<div class="hint" style="margin:4px 0 0;">Noch kein Flugzeug mehrfach geflogen.</div>' : ''));
       html += block('Sitzplätze (am häufigsten)', asBars(seats, 5));
       html += block('Sitzbuchstaben', asBars(letters, 6));
@@ -553,6 +569,9 @@
     en.disabled = false;
     try {
       const sub = await currentPushSub();
+      const wasActive = pushActive;
+      pushActive = !!sub;
+      if (pushActive !== wasActive) renderYearPlan();
       show(!!sub);
       st.textContent = sub ? '✅ Auf diesem Gerät aktiv.' : 'Auf diesem Gerät nicht aktiviert.';
     } catch (e) {
