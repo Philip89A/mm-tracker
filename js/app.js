@@ -1402,35 +1402,157 @@ window.exportTripsCsv = function() {
   downloadBlob(csv, 'text/csv;charset=utf-8;', `trip-log-${new Date().toISOString().slice(0, 10)}.csv`);
 };
 
-function renderMilesTrend(list) {
+// ---------- Meilen-Verlauf nach Monat ----------
+
+let milesTrendRange = '12';     // '12' | '24' | 'all'
+let milesTrendMode = 'month';   // 'month' (Netto je Monat) | 'balance' (kumulierter Bestand)
+let milesTrendSel = null;       // gewählter Monat "YYYY-MM"
+let milesTrendList = [];
+
+const MONTH_SHORT = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+const MONTH_LONG = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+
+function fmtSigned(v) { return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toLocaleString('de-DE'); }
+function fmtCompact(v) {
+  const a = Math.abs(v);
+  const s = a >= 10000 ? Math.round(a / 1000).toLocaleString('de-DE') + 'k' : a >= 1000 ? (a / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + 'k' : String(a);
+  return (v < 0 ? '−' : '') + s;
+}
+function niceCeil(v) {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+}
+
+window.setMilesTrend = function(kind, value) {
+  // Beim Antippen eines Monats soll das Diagramm nicht zurückspringen.
+  const prev = document.getElementById('mt-scroll');
+  const keepScroll = prev ? prev.scrollLeft : null;
+  if (kind === 'range') milesTrendRange = value;
+  else if (kind === 'mode') milesTrendMode = value;
+  else if (kind === 'month') milesTrendSel = value;
+  renderMilesTrend(milesTrendList, kind === 'month' ? keepScroll : null);
+};
+
+function renderMilesTrend(list, keepScroll = null) {
+  milesTrendList = list;
   const el = document.getElementById('miles-trend-chart');
   const titleEl = document.getElementById('miles-trend-title');
-  const byMonth = {};
-  list.forEach(mv => {
-    if (!mv.date) return;
-    const key = mv.date.slice(0, 7); // "YYYY-MM"
-    byMonth[key] = (byMonth[key] || 0) + mv.amount;
-  });
-  const months = Object.keys(byMonth).sort();
-  if (months.length === 0) {
+  const dated = list.filter(mv => mv.date);
+  if (!dated.length) {
     el.innerHTML = list.length ? '' : '<div class="empty">Keine Bewegungen für diesen Filter.</div>';
     titleEl.style.display = 'none';
     return;
   }
   titleEl.style.display = 'block';
-  const maxAbs = Math.max(1, ...months.map(m => Math.abs(byMonth[m])));
 
-  el.innerHTML = `<div class="trend-chart">${months.map(m => {
-    const val = byMonth[m];
-    const h = Math.max(2, Math.round((Math.abs(val) / maxAbs) * 100));
-    const label = m.slice(2).replace('-', '/'); // "26/08"
-    return `<div class="trend-col">
-      <div class="trend-bar-wrap">
-        <div class="trend-bar ${val >= 0 ? 'pos' : 'neg'}" style="height:${h}px;"><span class="trend-bar-val">${val >= 0 ? '+' : ''}${val.toLocaleString('de-DE')}</span></div>
-      </div>
-      <div class="trend-label">${label}</div>
-    </div>`;
-  }).join('')}</div>`;
+  // Je Monat Gewonnen/Eingelöst/Netto; Monate ohne Bewegung bleiben als 0 stehen, damit die Zeitachse stimmt.
+  const agg = {};
+  dated.forEach(mv => {
+    const k = mv.date.slice(0, 7);
+    const b = (agg[k] = agg[k] || { gain: 0, out: 0, cats: {} });
+    if (mv.amount >= 0) b.gain += mv.amount; else b.out += mv.amount;
+    b.cats[mv.category] = (b.cats[mv.category] || 0) + mv.amount;
+  });
+  const keys = Object.keys(agg).sort();
+  const nowKey = new Date().toISOString().slice(0, 7);
+  const lastKey = keys[keys.length - 1] > nowKey ? keys[keys.length - 1] : nowKey;
+  const all = [];
+  let [cy, cm] = keys[0].split('-').map(Number);
+  for (;;) {
+    const k = `${cy}-${String(cm).padStart(2, '0')}`;
+    if (k > lastKey) break;
+    const b = agg[k] || { gain: 0, out: 0, cats: {} };
+    all.push({ key: k, y: cy, m: cm, gain: b.gain, out: b.out, net: b.gain + b.out, cats: b.cats });
+    if (++cm > 12) { cm = 1; cy++; }
+  }
+  let run = 0;
+  all.forEach(x => { run += x.net; x.balance = run; });
+  const keep = milesTrendRange === 'all' ? all.length : Number(milesTrendRange);
+  const months = all.slice(-keep);
+  if (!months.some(x => x.key === milesTrendSel)) {
+    const lastActive = [...months].reverse().find(x => x.gain || x.out);
+    milesTrendSel = (lastActive || months[months.length - 1]).key;
+  }
+  const sel = months.find(x => x.key === milesTrendSel);
+
+  // --- Kennzahlen für den gezeigten Zeitraum ---
+  const total = months.reduce((s, x) => s + x.net, 0);
+  const best = months.reduce((b, x) => x.net > b.net ? x : b, months[0]);
+  const kpi = (n, l) => `<div class="stat"><div class="num" style="font-size:17px;">${n}</div><div class="lbl">${l}</div></div>`;
+  const kpis = `<div class="stat-row" style="margin-bottom:10px;">${kpi(fmtSigned(total), 'Netto im Zeitraum')}${kpi(fmtSigned(Math.round(total / months.length)), 'Ø pro Monat')}${kpi(best.net > 0 ? `${MONTH_SHORT[best.m - 1]} ${String(best.y).slice(2)}` : '–', best.net > 0 ? `Bester Monat (${fmtSigned(best.net)})` : 'Bester Monat')}</div>`;
+
+  const seg = (kind, cur, opts) => `<div class="goal-switcher" style="margin-bottom:8px;">${opts.map(([v, l]) =>
+    `<button type="button" class="goal-tab${cur === v ? ' active' : ''}" onclick="setMilesTrend('${kind}','${v}')">${l}</button>`).join('')}</div>`;
+  const controls = seg('mode', milesTrendMode, [['month', 'Monatlich (Netto)'], ['balance', 'Bestand']]) +
+    seg('range', milesTrendRange, [['12', '12 Monate'], ['24', '24 Monate'], ['all', 'Alles']]);
+
+  // --- SVG-Diagramm ---
+  const slot = Math.max(34, Math.min(56, Math.floor(300 / months.length)));
+  const padL = 40, padR = 8, top = 20, H = 130, bottom = 34;
+  const W = padL + padR + slot * months.length, Ht = top + H + bottom;
+  const vals = months.map(x => milesTrendMode === 'balance' ? x.balance : x.net);
+  const hi = Math.max(0, ...vals), lo = Math.min(0, ...vals);
+  const hiN = hi > 0 ? niceCeil(hi) : 0, loN = lo < 0 ? -niceCeil(-lo) : 0;
+  const span = (hiN - loN) || 1;
+  const y = (v) => top + (hiN - v) / span * H;
+  const y0 = y(0);
+  const cx = (i) => padL + slot * i + slot / 2;
+  const ticks = [...new Set([hiN, 0, loN])];
+  let svg = ticks.map(t => `<line x1="${padL}" x2="${W - padR}" y1="${y(t)}" y2="${y(t)}" class="mt-grid${t === 0 ? ' zero' : ''}"/><text x="${padL - 6}" y="${y(t) + 3.5}" class="mt-axis" text-anchor="end">${fmtCompact(t)}</text>`).join('');
+
+  if (milesTrendMode === 'month') {
+    const bw = Math.min(26, slot - 10);
+    const labelAll = months.length <= 14;
+    svg += months.map((x, i) => {
+      const v = x.net, h = Math.max(v === 0 ? 0 : 2, Math.abs(y(v) - y0));
+      const by = v >= 0 ? y0 - h : y0;
+      const isSel = x.key === milesTrendSel;
+      const showVal = v !== 0 && (labelAll || isSel);
+      const ty = v >= 0 ? by - 4 : by + h + 11;
+      return `<g class="mt-col${isSel ? ' sel' : ''}" onclick="setMilesTrend('month','${x.key}')">
+        <rect x="${padL + slot * i}" y="${top - 12}" width="${slot}" height="${H + 24}" fill="transparent"/>
+        ${v !== 0 ? `<rect x="${cx(i) - bw / 2}" y="${by}" width="${bw}" height="${h}" rx="3" class="mt-bar ${v > 0 ? 'pos' : 'neg'}"/>` : `<rect x="${cx(i) - bw / 2}" y="${y0 - 1}" width="${bw}" height="2" class="mt-bar zero"/>`}
+        ${showVal ? `<text x="${cx(i)}" y="${ty}" class="mt-val" text-anchor="middle">${fmtCompact(v)}</text>` : ''}
+      </g>`;
+    }).join('');
+  } else {
+    const pts = months.map((x, i) => `${cx(i)},${y(x.balance)}`);
+    svg += `<polygon points="${cx(0)},${y0} ${pts.join(' ')} ${cx(months.length - 1)},${y0}" class="mt-area"/><polyline points="${pts.join(' ')}" class="mt-line"/>` +
+      months.map((x, i) => `<g class="mt-col${x.key === milesTrendSel ? ' sel' : ''}" onclick="setMilesTrend('month','${x.key}')">
+        <rect x="${padL + slot * i}" y="${top - 12}" width="${slot}" height="${H + 24}" fill="transparent"/>
+        <circle cx="${cx(i)}" cy="${y(x.balance)}" r="${x.key === milesTrendSel ? 4.5 : 2.5}" class="mt-dot"/></g>`).join('');
+    const sI = months.findIndex(x => x.key === milesTrendSel);
+    if (sI >= 0) svg += `<text x="${cx(sI)}" y="${y(months[sI].balance) - 9}" class="mt-val" text-anchor="middle">${fmtCompact(months[sI].balance)}</text>`;
+  }
+  svg += months.map((x, i) => {
+    const showYear = i === 0 || x.m === 1;
+    return `<text x="${cx(i)}" y="${top + H + 14}" class="mt-xl${x.key === milesTrendSel ? ' sel' : ''}" text-anchor="middle">${MONTH_SHORT[x.m - 1]}</text>${showYear ? `<text x="${cx(i)}" y="${top + H + 27}" class="mt-xy" text-anchor="middle">${x.y}</text>` : ''}`;
+  }).join('');
+
+  // --- Detail zum gewählten Monat ---
+  const topCats = Object.entries(sel.cats).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 3);
+  const detail = `<div class="mt-detail">
+    <div class="mt-detail-head"><b>${MONTH_LONG[sel.m - 1]} ${sel.y}</b><span>Bestand danach: ${sel.balance.toLocaleString('de-DE')}</span></div>
+    <div class="mt-detail-row"><span>Gewonnen</span><b class="pos">${fmtSigned(sel.gain)}</b></div>
+    <div class="mt-detail-row"><span>Eingelöst/Abgang</span><b class="neg">${fmtSigned(sel.out)}</b></div>
+    <div class="mt-detail-row"><span>Netto</span><b>${fmtSigned(sel.net)}</b></div>
+    ${topCats.length ? `<div class="mt-detail-cats">${topCats.map(([c, v]) => `${escHtml(c)} ${fmtSigned(v)}`).join(' · ')}</div>` : '<div class="mt-detail-cats">Keine Bewegungen in diesem Monat.</div>'}
+  </div>`;
+
+  el.innerHTML = kpis + controls + `<div class="mt-scroll" id="mt-scroll"><svg class="mt-svg" viewBox="0 0 ${W} ${Ht}" width="${Math.max(W, 300)}" height="${Ht}" role="img" aria-label="Meilen-Verlauf nach Monat">${svg}</svg></div>` + detail;
+  // Das rechte Ende (neueste Monate) zuerst zeigen
+  const sc = document.getElementById('mt-scroll');
+  if (sc) {
+    const place = () => { sc.scrollLeft = keepScroll !== null ? keepScroll : sc.scrollWidth; };
+    place();
+    // Beim Rendern im versteckten Tab ist die Breite 0 — beim ersten Anzeigen nochmal ausrichten.
+    if (window.ResizeObserver) {
+      const ro = new ResizeObserver(() => { if (sc.clientWidth > 0) { place(); ro.disconnect(); } });
+      ro.observe(sc);
+    }
+  }
 }
 
 function renderMiles() {

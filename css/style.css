@@ -388,3 +388,30 @@ nav.tabbar button.active { color: var(--navy); font-weight: 700; }
 /* Saisonjahr-Auswahl im Dashboard */
 .season-switch { margin-bottom: 14px; }
 .season-switch select { width: 100%; max-width: 100%; margin-top: 0; font-weight: 700; color: var(--navy); }
+
+/* Meilen-Verlauf nach Monat */
+.mt-scroll { overflow-x: auto; margin: 2px -4px 0; padding: 0 4px; }
+.mt-svg { display: block; max-width: none; }
+.mt-grid { stroke: var(--gray-border); stroke-width: 1; stroke-dasharray: 3 3; }
+.mt-grid.zero { stroke: #adb5bd; stroke-dasharray: none; }
+.mt-axis { font-size: 9.5px; fill: var(--muted); }
+.mt-bar.pos { fill: var(--green); }
+.mt-bar.neg { fill: var(--red); }
+.mt-bar.zero { fill: #ced4da; }
+.mt-col { cursor: pointer; }
+.mt-col:not(.sel) .mt-bar { opacity: 0.72; }
+.mt-col.sel .mt-bar { opacity: 1; }
+.mt-val { font-size: 10px; font-weight: 700; fill: var(--navy); }
+.mt-xl { font-size: 10.5px; font-weight: 600; fill: var(--muted); }
+.mt-xl.sel { fill: var(--navy); font-weight: 800; }
+.mt-xy { font-size: 9px; fill: var(--muted); }
+.mt-area { fill: var(--green); opacity: 0.14; }
+.mt-line { fill: none; stroke: var(--green); stroke-width: 2.2; stroke-linejoin: round; }
+.mt-dot { fill: var(--green); stroke: white; stroke-width: 1.5; }
+.mt-detail { background: var(--gray-bg); border-radius: 10px; padding: 10px 12px; margin-top: 8px; font-size: 13px; }
+.mt-detail-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; color: var(--navy); }
+.mt-detail-head span { font-size: 11.5px; color: var(--muted); }
+.mt-detail-row { display: flex; justify-content: space-between; padding: 2px 0; }
+.mt-detail-row .pos { color: var(--green); }
+.mt-detail-row .neg { color: var(--red); }
+.mt-detail-cats { margin-top: 4px; font-size: 11.5px; color: var(--muted); }
