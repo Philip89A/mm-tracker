@@ -1405,9 +1405,11 @@ window.exportTripsCsv = function() {
 // ---------- Meilen-Verlauf nach Monat ----------
 
 let milesTrendRange = '12';     // '12' | '24' | 'all'
-let milesTrendMode = 'month';   // 'month' (Netto je Monat) | 'balance' (kumulierter Bestand)
+let milesTrendMode = 'month';   // 'month' (Netto je Monat) | 'cat' (gestapelt nach Kategorie) | 'balance' (kumulierter Bestand)
 let milesTrendSel = null;       // gewählter Monat "YYYY-MM"
 let milesTrendList = [];
+let milesTrendWidth = 0;        // Breite, mit der zuletzt gezeichnet wurde
+let milesTrendObserver = null;
 
 const MONTH_SHORT = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
 const MONTH_LONG = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
@@ -1422,7 +1424,7 @@ function niceCeil(v) {
   if (v <= 0) return 1;
   const p = Math.pow(10, Math.floor(Math.log10(v)));
   const n = v / p;
-  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+  return ([1, 1.5, 2, 3, 4, 5, 6, 8, 10].find(s => n <= s)) * p;
 }
 
 window.setMilesTrend = function(kind, value) {
@@ -1447,14 +1449,27 @@ function renderMilesTrend(list, keepScroll = null) {
   }
   titleEl.style.display = 'block';
 
-  // Je Monat Gewonnen/Eingelöst/Netto; Monate ohne Bewegung bleiben als 0 stehen, damit die Zeitachse stimmt.
-  const agg = {};
+  // Bei geänderter Kartenbreite (Drehen, Fenstergröße, erstes Einblenden des Tabs) neu zeichnen.
+  if (!milesTrendObserver && window.ResizeObserver) {
+    milesTrendObserver = new ResizeObserver(() => {
+      if (el.clientWidth > 0 && Math.abs(el.clientWidth - milesTrendWidth) > 6) renderMilesTrend(milesTrendList);
+    });
+    milesTrendObserver.observe(el);
+  }
+  const availW = el.clientWidth || milesTrendWidth || 330;
+  milesTrendWidth = el.clientWidth || milesTrendWidth;
+
+  // Je Monat Gewonnen/Eingelöst/Netto und je Kategorie; Monate ohne Bewegung bleiben als 0 stehen, damit die Zeitachse stimmt.
+  const agg = {}, catVolume = {};
   dated.forEach(mv => {
     const k = mv.date.slice(0, 7);
     const b = (agg[k] = agg[k] || { gain: 0, out: 0, cats: {} });
     if (mv.amount >= 0) b.gain += mv.amount; else b.out += mv.amount;
     b.cats[mv.category] = (b.cats[mv.category] || 0) + mv.amount;
+    catVolume[mv.category] = (catVolume[mv.category] || 0) + Math.abs(mv.amount);
   });
+  // Feste Reihenfolge der Kategorien im Stapel: größte zuerst (unten)
+  const catOrder = Object.keys(catVolume).sort((a, b) => catVolume[b] - catVolume[a]);
   const keys = Object.keys(agg).sort();
   const nowKey = new Date().toISOString().slice(0, 7);
   const lastKey = keys[keys.length - 1] > nowKey ? keys[keys.length - 1] : nowKey;
@@ -1485,74 +1500,88 @@ function renderMilesTrend(list, keepScroll = null) {
 
   const seg = (kind, cur, opts) => `<div class="goal-switcher" style="margin-bottom:8px;">${opts.map(([v, l]) =>
     `<button type="button" class="goal-tab${cur === v ? ' active' : ''}" onclick="setMilesTrend('${kind}','${v}')">${l}</button>`).join('')}</div>`;
-  const controls = seg('mode', milesTrendMode, [['month', 'Monatlich (Netto)'], ['balance', 'Bestand']]) +
+  const controls = seg('mode', milesTrendMode, [['month', 'Netto'], ['cat', 'Kategorien'], ['balance', 'Bestand']]) +
     seg('range', milesTrendRange, [['12', '12 Monate'], ['24', '24 Monate'], ['all', 'Alles']]);
 
-  // --- SVG-Diagramm ---
-  const slot = Math.max(34, Math.min(56, Math.floor(300 / months.length)));
-  const padL = 40, padR = 8, top = 20, H = 130, bottom = 34;
-  const W = padL + padR + slot * months.length, Ht = top + H + bottom;
-  const vals = months.map(x => milesTrendMode === 'balance' ? x.balance : x.net);
-  const hi = Math.max(0, ...vals), lo = Math.min(0, ...vals);
+  // --- SVG-Diagramm: füllt die volle Breite, bei sehr vielen Monaten wird gescrollt ---
+  const padL = 36, padR = 6, top = 20, H = 150, bottom = 34, minSlot = 22;
+  const slot = Math.max(minSlot, (availW - padL - padR) / months.length);
+  const W = Math.round(padL + padR + slot * months.length), Ht = top + H + bottom;
+  const catSplit = milesTrendMode === 'cat';
+  // Stapel je Monat: Kategorien mit positivem Monatssaldo nach oben, mit negativem nach unten
+  const stacks = months.map(x => {
+    const pos = [], neg = [];
+    catOrder.forEach(c => { const v = x.cats[c] || 0; if (v > 0) pos.push([c, v]); else if (v < 0) neg.push([c, v]); });
+    return { pos, neg, posSum: pos.reduce((s, p) => s + p[1], 0), negSum: neg.reduce((s, p) => s + p[1], 0) };
+  });
+  let hi, lo;
+  if (milesTrendMode === 'balance') { const v = months.map(x => x.balance); hi = Math.max(0, ...v); lo = Math.min(0, ...v); }
+  else if (catSplit) { hi = Math.max(0, ...stacks.map(s => s.posSum)); lo = Math.min(0, ...stacks.map(s => s.negSum)); }
+  else { const v = months.map(x => x.net); hi = Math.max(0, ...v); lo = Math.min(0, ...v); }
   const hiN = hi > 0 ? niceCeil(hi) : 0, loN = lo < 0 ? -niceCeil(-lo) : 0;
   const span = (hiN - loN) || 1;
   const y = (v) => top + (hiN - v) / span * H;
   const y0 = y(0);
   const cx = (i) => padL + slot * i + slot / 2;
   const ticks = [...new Set([hiN, 0, loN])];
-  let svg = ticks.map(t => `<line x1="${padL}" x2="${W - padR}" y1="${y(t)}" y2="${y(t)}" class="mt-grid${t === 0 ? ' zero' : ''}"/><text x="${padL - 6}" y="${y(t) + 3.5}" class="mt-axis" text-anchor="end">${fmtCompact(t)}</text>`).join('');
+  let svg = ticks.map(t => `<line x1="${padL}" x2="${W - padR}" y1="${y(t)}" y2="${y(t)}" class="mt-grid${t === 0 ? ' zero' : ''}"/><text x="${padL - 5}" y="${y(t) + 3.5}" class="mt-axis" text-anchor="end">${fmtCompact(t)}</text>`).join('');
+  const hit = (i, x) => `<rect x="${padL + slot * i}" y="${top - 12}" width="${slot}" height="${H + 24}" fill="transparent"/>`;
+  const labelAll = slot >= 30;
 
-  if (milesTrendMode === 'month') {
-    const bw = Math.min(26, slot - 10);
-    const labelAll = months.length <= 14;
-    svg += months.map((x, i) => {
-      const v = x.net, h = Math.max(v === 0 ? 0 : 2, Math.abs(y(v) - y0));
-      const by = v >= 0 ? y0 - h : y0;
-      const isSel = x.key === milesTrendSel;
-      const showVal = v !== 0 && (labelAll || isSel);
-      const ty = v >= 0 ? by - 4 : by + h + 11;
-      return `<g class="mt-col${isSel ? ' sel' : ''}" onclick="setMilesTrend('month','${x.key}')">
-        <rect x="${padL + slot * i}" y="${top - 12}" width="${slot}" height="${H + 24}" fill="transparent"/>
-        ${v !== 0 ? `<rect x="${cx(i) - bw / 2}" y="${by}" width="${bw}" height="${h}" rx="3" class="mt-bar ${v > 0 ? 'pos' : 'neg'}"/>` : `<rect x="${cx(i) - bw / 2}" y="${y0 - 1}" width="${bw}" height="2" class="mt-bar zero"/>`}
-        ${showVal ? `<text x="${cx(i)}" y="${ty}" class="mt-val" text-anchor="middle">${fmtCompact(v)}</text>` : ''}
-      </g>`;
-    }).join('');
-  } else {
+  if (milesTrendMode === 'balance') {
     const pts = months.map((x, i) => `${cx(i)},${y(x.balance)}`);
     svg += `<polygon points="${cx(0)},${y0} ${pts.join(' ')} ${cx(months.length - 1)},${y0}" class="mt-area"/><polyline points="${pts.join(' ')}" class="mt-line"/>` +
-      months.map((x, i) => `<g class="mt-col${x.key === milesTrendSel ? ' sel' : ''}" onclick="setMilesTrend('month','${x.key}')">
-        <rect x="${padL + slot * i}" y="${top - 12}" width="${slot}" height="${H + 24}" fill="transparent"/>
+      months.map((x, i) => `<g class="mt-col${x.key === milesTrendSel ? ' sel' : ''}" onclick="setMilesTrend('month','${x.key}')">${hit(i, x)}
         <circle cx="${cx(i)}" cy="${y(x.balance)}" r="${x.key === milesTrendSel ? 4.5 : 2.5}" class="mt-dot"/></g>`).join('');
     const sI = months.findIndex(x => x.key === milesTrendSel);
     if (sI >= 0) svg += `<text x="${cx(sI)}" y="${y(months[sI].balance) - 9}" class="mt-val" text-anchor="middle">${fmtCompact(months[sI].balance)}</text>`;
+  } else {
+    const bw = Math.min(44, slot - Math.min(10, slot * 0.25));
+    svg += months.map((x, i) => {
+      const isSel = x.key === milesTrendSel;
+      let bars = '', topY = y0, botY = y0;
+      if (catSplit) {
+        let acc = 0;
+        stacks[i].pos.forEach(([c, v]) => { const y1 = y(acc + v), h = Math.max(1, y(acc) - y1); bars += `<rect x="${cx(i) - bw / 2}" y="${y1}" width="${bw}" height="${h}" fill="${categoryColor(c)}"><title>${escHtml(c)} ${fmtSigned(v)}</title></rect>`; acc += v; });
+        topY = y(acc); acc = 0;
+        stacks[i].neg.forEach(([c, v]) => { const y1 = y(acc + v), h = Math.max(1, y1 - y(acc)); bars += `<rect x="${cx(i) - bw / 2}" y="${y(acc)}" width="${bw}" height="${h}" fill="${categoryColor(c)}"><title>${escHtml(c)} ${fmtSigned(v)}</title></rect>`; acc += v; });
+        botY = y(acc);
+        if (!bars) bars = `<rect x="${cx(i) - bw / 2}" y="${y0 - 1}" width="${bw}" height="2" class="mt-bar zero"/>`;
+      } else {
+        const v = x.net, h = Math.max(v === 0 ? 0 : 2, Math.abs(y(v) - y0));
+        if (v > 0) { topY = y0 - h; bars = `<rect x="${cx(i) - bw / 2}" y="${topY}" width="${bw}" height="${h}" rx="3" class="mt-bar pos"/>`; }
+        else if (v < 0) { botY = y0 + h; bars = `<rect x="${cx(i) - bw / 2}" y="${y0}" width="${bw}" height="${h}" rx="3" class="mt-bar neg"/>`; }
+        else bars = `<rect x="${cx(i) - bw / 2}" y="${y0 - 1}" width="${bw}" height="2" class="mt-bar zero"/>`;
+      }
+      // Beschriftung: Netto-Wert über (bzw. unter) dem Balken
+      const showVal = x.net !== 0 && (labelAll || isSel);
+      const above = catSplit ? stacks[i].posSum > 0 : x.net > 0;
+      const lbl = showVal ? `<text x="${cx(i)}" y="${above ? topY - 4 : botY + 11}" class="mt-val" text-anchor="middle">${fmtCompact(x.net)}</text>` : '';
+      return `<g class="mt-col${isSel ? ' sel' : ''}" onclick="setMilesTrend('month','${x.key}')">${hit(i, x)}${bars}${lbl}</g>`;
+    }).join('');
   }
   svg += months.map((x, i) => {
     const showYear = i === 0 || x.m === 1;
     return `<text x="${cx(i)}" y="${top + H + 14}" class="mt-xl${x.key === milesTrendSel ? ' sel' : ''}" text-anchor="middle">${MONTH_SHORT[x.m - 1]}</text>${showYear ? `<text x="${cx(i)}" y="${top + H + 27}" class="mt-xy" text-anchor="middle">${x.y}</text>` : ''}`;
   }).join('');
 
-  // --- Detail zum gewählten Monat ---
-  const topCats = Object.entries(sel.cats).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 3);
+  // --- Legende (nur im Kategorien-Modus) ---
+  const legend = catSplit ? `<div class="mt-legend">${catOrder.map(c => `<span><i style="background:${categoryColor(c)}"></i>${escHtml(c)}</span>`).join('')}</div>` : '';
+
+  // --- Detail zum gewählten Monat, immer mit allen Kategorien ---
+  const cats = Object.entries(sel.cats).filter(([, v]) => v !== 0).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
   const detail = `<div class="mt-detail">
     <div class="mt-detail-head"><b>${MONTH_LONG[sel.m - 1]} ${sel.y}</b><span>Bestand danach: ${sel.balance.toLocaleString('de-DE')}</span></div>
     <div class="mt-detail-row"><span>Gewonnen</span><b class="pos">${fmtSigned(sel.gain)}</b></div>
     <div class="mt-detail-row"><span>Eingelöst/Abgang</span><b class="neg">${fmtSigned(sel.out)}</b></div>
     <div class="mt-detail-row"><span>Netto</span><b>${fmtSigned(sel.net)}</b></div>
-    ${topCats.length ? `<div class="mt-detail-cats">${topCats.map(([c, v]) => `${escHtml(c)} ${fmtSigned(v)}`).join(' · ')}</div>` : '<div class="mt-detail-cats">Keine Bewegungen in diesem Monat.</div>'}
+    ${cats.length ? `<div class="mt-detail-cats">${cats.map(([c, v]) => `<div class="mt-cat-row"><span><i style="background:${categoryColor(c)}"></i>${escHtml(c)}</span><b>${fmtSigned(v)}</b></div>`).join('')}</div>` : '<div class="mt-detail-cats">Keine Bewegungen in diesem Monat.</div>'}
   </div>`;
 
-  el.innerHTML = kpis + controls + `<div class="mt-scroll" id="mt-scroll"><svg class="mt-svg" viewBox="0 0 ${W} ${Ht}" width="${Math.max(W, 300)}" height="${Ht}" role="img" aria-label="Meilen-Verlauf nach Monat">${svg}</svg></div>` + detail;
-  // Das rechte Ende (neueste Monate) zuerst zeigen
+  const fits = W <= availW + 1;
+  el.innerHTML = kpis + controls + `<div class="mt-scroll" id="mt-scroll"><svg class="mt-svg" viewBox="0 0 ${W} ${Ht}" ${fits ? 'style="width:100%; height:auto;"' : `width="${W}" height="${Ht}"`} role="img" aria-label="Meilen-Verlauf nach Monat">${svg}</svg></div>` + legend + detail;
   const sc = document.getElementById('mt-scroll');
-  if (sc) {
-    const place = () => { sc.scrollLeft = keepScroll !== null ? keepScroll : sc.scrollWidth; };
-    place();
-    // Beim Rendern im versteckten Tab ist die Breite 0 — beim ersten Anzeigen nochmal ausrichten.
-    if (window.ResizeObserver) {
-      const ro = new ResizeObserver(() => { if (sc.clientWidth > 0) { place(); ro.disconnect(); } });
-      ro.observe(sc);
-    }
-  }
+  if (sc && !fits) sc.scrollLeft = keepScroll !== null ? keepScroll : sc.scrollWidth; // neueste Monate zuerst zeigen
 }
 
 function renderMiles() {
