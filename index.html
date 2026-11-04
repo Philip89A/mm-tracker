@@ -748,6 +748,23 @@
         <label>Kreditkarten-Meilen-Tausch (5.000er-Schritte, 250 Meilen = 1 P + 1 QP)</label>
         <input type="range" id="sim-cc" min="0" max="25000" step="5000" value="0">
         <p class="hint" id="sim-cc-hint" style="margin:2px 0 0;"></p>
+        <h3 class="sim-h">Uptrip-Kollektionen</h3>
+        <p class="hint" style="margin:0 0 6px;">Deine Kollektionen aus dem Tab Sammeln: Wähle, wie oft du sie im Szenario einlöst. Das geht auch, wenn noch Karten fehlen.</p>
+        <div id="sim-uptrip"></div>
+        <div class="subcard" style="margin-top:8px;">
+          <label style="margin-top:0;">Eigene Kollektion / Einlösung im Szenario</label>
+          <div class="row2">
+            <div><input type="text" id="sim-up-name" placeholder="Name, z.B. Sommer-Kollektion"></div>
+            <div><input type="number" id="sim-up-count" min="1" value="1" placeholder="× Einlösungen"></div>
+          </div>
+          <div class="row2">
+            <div><input type="number" id="sim-up-p" min="0" placeholder="Points je Einlösung"></div>
+            <div><input type="number" id="sim-up-q" min="0" placeholder="QP je Einlösung"></div>
+          </div>
+          <button type="button" class="btn small secondary" id="sim-up-add" style="margin-top:8px;">➕ Hinzufügen</button>
+          <div id="sim-up-custom"></div>
+        </div>
+
         <div class="row2">
           <div><label>Zusätzliche Points (z.B. Hotel, Partner)</label><input type="number" id="sim-extra-p" min="0" placeholder="0"></div>
           <div><label>Zusätzliche QP</label><input type="number" id="sim-extra-q" min="0" placeholder="0"></div>

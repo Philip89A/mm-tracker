@@ -13,6 +13,8 @@
   const sgn = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n));
 
   let flights = []; // { id, route, range ('auto'|'continental'|'intercontinental'), legRanges, cls, co2, segments, count, mode }
+  let upCounts = {};   // Einlösungen je vorhandener Uptrip-Kollektion (Schlüssel: Name in Kleinschreibung)
+  let upCustom = [];   // eigene Einträge: { id, name, p, q, count }
 
   // ---------- Unterseiten im Rechner-Tab ----------
   function setRechnerPage(page) {
@@ -43,6 +45,19 @@
   }
   const flightSegments = (f) => (f.range === 'auto' ? f.legRanges.length : f.segments) * f.count;
 
+  // Uptrip: Kollektionen aus dem Tab Sammeln (Prämie je Einlösung) plus eigene Einträge im Szenario.
+  const upKey = (u) => String(u.name || '').trim().toLowerCase();
+  const upRemaining = (u) => Math.max(0, (u.maxRedemptions || 1) - (u.redemptionCount || 0));
+  function uptripEffect() {
+    let p = 0, q = 0, n = 0;
+    uptripItems.forEach(u => {
+      const c = Math.min(upCounts[upKey(u)] || 0, upRemaining(u));
+      p += (u.rewardPoints || 0) * c; q += (u.rewardQP || 0) * c; n += c;
+    });
+    upCustom.forEach(c => { p += c.p * c.count; q += c.q * c.count; n += c.count; });
+    return { p, q, n };
+  }
+
   function simulate() {
     const year = seasonYear();
     const ach = computeAchievedTotals(year);
@@ -52,13 +67,14 @@
     const extra = { p: parseInt($('sim-extra-p').value) || 0, q: parseInt($('sim-extra-q').value) || 0 };
     const ccMiles = parseInt($('sim-cc').value) || 0;
     const cc = Math.floor(ccMiles / 250);
-    let p = base.p + fl.p + extra.p + cc, q = base.q + fl.q + extra.q + cc;
+    const up = uptripEffect();
+    let p = base.p + fl.p + extra.p + up.p + cc, q = base.q + fl.q + extra.q + up.q + cc;
     // Der 800-QP-Tausch braucht schon 800 QP — diese darf der Kreditkarten-Tausch mit herstellen.
     const swapWanted = $('sim-lever800').checked;
     const swapUsed = leverSwapUsed(year);
     const swapOk = swapWanted && !swapUsed && q >= 800;
     if (swapOk) { p += 125; q += 125; }
-    return { year, base, fl, extra, cc, ccMiles, swapWanted, swapUsed, swapOk, total: { p, q } };
+    return { year, base, fl, extra, up, cc, ccMiles, swapWanted, swapUsed, swapOk, total: { p, q } };
   }
 
   // ---------- Darstellung ----------
@@ -75,6 +91,31 @@
     }).join('') : '<div class="hint" style="margin:4px 0 0;">Noch keine Flüge im Szenario.</div>';
   }
 
+  function renderUptripList() {
+    const rewardText = (u) => [u.rewardPoints ? `${u.rewardPoints} P` : '', u.rewardQP ? `${u.rewardQP} QP` : '', u.rewardMeilen ? `${fmt(u.rewardMeilen)} Meilen` : ''].filter(Boolean).join(' · ') || 'keine Prämie hinterlegt';
+    const rows = uptripItems.map(u => {
+      const key = esc(upKey(u)), rem = upRemaining(u), c = Math.min(upCounts[upKey(u)] || 0, rem);
+      const hasPQ = (u.rewardPoints || 0) + (u.rewardQP || 0) > 0;
+      const needed = u.needed || 1, have = Math.min(u.have || 0, needed);
+      const status = rem === 0 ? 'Limit erreicht' : `${have}/${needed} Karten · noch ${rem} Einlösung${rem === 1 ? '' : 'en'} möglich${have < needed ? ' (Karten fehlen noch)' : ''}`;
+      return `<div class="sim-row"><div><b>${esc(u.name)}</b><div class="meta" style="font-size:12px; color:var(--muted);">${esc(rewardText(u))} je Einlösung · ${status}</div></div>
+        <div style="white-space:nowrap; text-align:right;">
+          <button type="button" class="btn small secondary" data-k="${key}" onclick="simUptrip(this.dataset.k, -1)" ${c <= 0 ? 'disabled' : ''}>−</button>
+          <b style="display:inline-block; min-width:22px; text-align:center;">${c}</b>
+          <button type="button" class="btn small secondary" data-k="${key}" onclick="simUptrip(this.dataset.k, 1)" ${rem === 0 || !hasPQ || c >= rem ? 'disabled' : ''}>+</button></div></div>`;
+    });
+    $('sim-uptrip').innerHTML = rows.length ? rows.join('') : '<div class="hint" style="margin:4px 0 0;">Noch keine Kollektionen im Tab Sammeln angelegt — unten kannst du eine eigene Einlösung ansetzen.</div>';
+    $('sim-up-custom').innerHTML = upCustom.map(c => `<div class="sim-row"><div><b>${c.count > 1 ? c.count + '× ' : ''}${esc(c.name)}</b></div>
+      <div style="white-space:nowrap; text-align:right;"><b>+${fmt(c.p * c.count)} P / +${fmt(c.q * c.count)} QP</b><br><button class="del" onclick="simRemoveUptrip('${c.id}')">entfernen</button></div></div>`).join('');
+  }
+  window.simUptrip = (key, d) => {
+    const u = uptripItems.find(x => upKey(x) === key);
+    if (!u) return;
+    upCounts[key] = Math.max(0, Math.min(upRemaining(u), (upCounts[key] || 0) + d));
+    renderSim();
+  };
+  window.simRemoveUptrip = (id) => { upCustom = upCustom.filter(c => c.id !== id); renderSim(); };
+
   function renderResult() {
     const r = simulate();
     const rows = [['Points', r.base.p, r.total.p - r.base.p, r.total.p], ['QP', r.base.q, r.total.q - r.base.q, r.total.q]];
@@ -83,6 +124,7 @@
 
     const parts = [];
     if (r.fl.p || r.fl.q) parts.push(`Flüge: +${fmt(r.fl.p)} P / +${fmt(r.fl.q)} QP (${fmt(flights.reduce((s, f) => s + flightSegments(f), 0))} Segmente)`);
+    if (r.up.n) parts.push(`Uptrip: +${fmt(r.up.p)} P / +${fmt(r.up.q)} QP (${r.up.n} Einlösung${r.up.n === 1 ? '' : 'en'})`);
     if (r.cc) parts.push(`Kreditkarten-Tausch (${fmt(r.ccMiles)} Meilen): +${fmt(r.cc)} P / +${fmt(r.cc)} QP`);
     if (r.extra.p || r.extra.q) parts.push(`Zusätze: +${fmt(r.extra.p)} P / +${fmt(r.extra.q)} QP`);
     if (r.swapWanted) parts.push(r.swapUsed ? '800-QP-Tausch: in dieser Saison schon genutzt (steckt im Stand)' : r.swapOk ? '800-QP-Tausch: +125 P / +125 QP' : `800-QP-Tausch: im Szenario erst ${fmt(r.total.q)} QP — erst ab 800 QP möglich`);
@@ -132,6 +174,7 @@
     $('sim-year').textContent = seasonYear();
     syncCcSlider();
     renderFlightList();
+    renderUptripList();
     renderResult();
     renderSavedScenarios();
   }
@@ -151,6 +194,14 @@
     }
     flights.push(f);
     msg.textContent = '';
+    renderSim();
+  });
+  $('sim-up-add').addEventListener('click', () => {
+    const p = parseInt($('sim-up-p').value) || 0, q = parseInt($('sim-up-q').value) || 0;
+    if (!p && !q) return;
+    upCustom.push({ id: genId(), name: $('sim-up-name').value.trim() || 'Uptrip-Einlösung', p, q, count: Math.max(1, parseInt($('sim-up-count').value) || 1) });
+    ['sim-up-name', 'sim-up-p', 'sim-up-q'].forEach(id => { $(id).value = ''; });
+    $('sim-up-count').value = 1;
     renderSim();
   });
   window.simRemoveFlight = (id) => { flights = flights.filter(f => f.id !== id); renderSim(); };
@@ -181,7 +232,7 @@
     await saveTrips();
     // Die Flüge stecken jetzt in den geplanten Trips; im Szenario würden sie doppelt zählen.
     flights = [];
-    msg.textContent = `${made.length} geplante${made.length === 1 ? 'r Trip' : ' Trips'} angelegt (Tab Trips → Trip-Log) und aus dem Szenario entfernt, damit nichts doppelt zählt.`;
+    msg.textContent = `${made.length} geplante${made.length === 1 ? 'r Trip' : ' Trips'} angelegt (Tab Trips → Trip-Log) und aus dem Szenario entfernt, damit nichts doppelt zählt. Uptrip-Einlösungen werden nicht übernommen — die buchst du im Tab Sammeln.`;
     render();
   });
 
@@ -190,7 +241,8 @@
     if (!name) { $('sim-adopt-msg').textContent = 'Bitte einen Namen für das Szenario eingeben.'; return; }
     settings.scenarios = [...(settings.scenarios || []), {
       id: genId(), name, flights: flights.map(f => ({ ...f })), lever800: $('sim-lever800').checked, ccMiles: parseInt($('sim-cc').value) || 0,
-      extraP: parseInt($('sim-extra-p').value) || 0, extraQ: parseInt($('sim-extra-q').value) || 0, planned: $('sim-planned').checked
+      extraP: parseInt($('sim-extra-p').value) || 0, extraQ: parseInt($('sim-extra-q').value) || 0, planned: $('sim-planned').checked,
+      upCounts: { ...upCounts }, upCustom: upCustom.map(c => ({ ...c }))
     }];
     await saveSettings();
     $('sim-name').value = '';
@@ -201,6 +253,8 @@
     const s = (settings.scenarios || []).find(x => x.id === id);
     if (!s) return;
     flights = s.flights.map(f => ({ ...f, id: genId() }));
+    upCounts = { ...(s.upCounts || {}) };
+    upCustom = (s.upCustom || []).map(c => ({ ...c, id: genId() }));
     $('sim-lever800').checked = !!s.lever800;
     $('sim-cc').value = s.ccMiles || 0;
     $('sim-extra-p').value = s.extraP || '';
