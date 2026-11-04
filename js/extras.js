@@ -301,6 +301,68 @@
   }
   const block = (title, inner) => inner ? `<div style="margin-top:16px;"><div style="font-weight:700; color:var(--navy); font-size:13px;">${title}</div>${inner}</div>` : '';
 
+  // ---------- Sitzregel: Zuordnung der Sitzbuchstaben zu Fenster/Mitte/Gang je Flugzeugtyp ----------
+
+  const seatId = (type) => 'sm-' + type.replace(/[^A-Z0-9]/gi, '_');
+  const SEAT_PRESETS = { '3-3': ['AF', 'BE', 'CD'], '2-2': ['AF', '', 'CD'], '2-4-2': ['AK', 'DGH', 'CJ'] };
+
+  function seatRuleBlock(unknownTypes) {
+    const custom = Object.entries(settings.seatMaps || {});
+    const typeRow = ([type, seats]) => {
+      const id = seatId(type);
+      const real = type !== '(Typ fehlt)';
+      return `<div class="seat-ask-row">
+        <div style="font-weight:700; color:var(--navy);">${esc(type)} <span style="font-weight:400; color:var(--muted); font-size:12px;">· Sitze: ${esc([...new Set(seats)].slice(0, 8).join(', '))}</span></div>
+        ${real ? `<div class="seat-ask-grid">
+          <div><label>Fenster</label><input type="text" id="${id}-window" maxlength="6" placeholder="AF" autocomplete="off"></div>
+          <div><label>Mitte</label><input type="text" id="${id}-middle" maxlength="6" placeholder="BE" autocomplete="off"></div>
+          <div><label>Gang</label><input type="text" id="${id}-aisle" maxlength="6" placeholder="CD" autocomplete="off"></div>
+        </div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+          <button type="button" class="btn small secondary" onclick="seatPreset('${type}','3-3')">3-3 (A F · B E · C D)</button>
+          <button type="button" class="btn small secondary" onclick="seatPreset('${type}','2-2')">2-2 (A F · C D)</button>
+          <button type="button" class="btn small" onclick="saveSeatMap('${type}')">Speichern</button>
+        </div>` : '<div class="hint" style="margin:2px 0 0;">Flugzeugtyp im Trip ergänzen, dann kann die Sitzart zugeordnet werden.</div>'}
+      </div>`;
+    };
+    let html = '';
+    if (unknownTypes.size) {
+      html += `<div class="seat-ask"><div style="font-weight:700; color:var(--navy); font-size:13px;">Sitzanordnung klären</div>
+        <div class="hint" style="margin:2px 0 6px;">Bei Airbus A319/A320/A321 (3-3-Bestuhlung) gilt: A und F = Fenster, B und E = Mitte, C und D = Gang. Für diese Typen kenne ich die Verteilung der Sitzbuchstaben nicht. Bitte angeben, welche Buchstaben Fenster, Mitte und Gang sind (Mitte bleibt bei 2-2-Anordnung leer).</div>
+        ${[...unknownTypes].map(typeRow).join('')}</div>`;
+    }
+    if (custom.length) {
+      html += block('Eigene Sitzzuordnungen', custom.map(([t, l]) => `<div class="mt-cat-row" style="margin-top:4px;"><span><b>${esc(t)}</b>&nbsp; Fenster ${esc(l.window || '–')} · Mitte ${esc(l.middle || '–')} · Gang ${esc(l.aisle || '–')}</span>
+        <button class="del" onclick="resetSeatMap('${t}')">entfernen</button></div>`).join(''));
+    }
+    return html;
+  }
+
+  window.seatPreset = function(type, name) {
+    const id = seatId(type), [w, m, a] = SEAT_PRESETS[name];
+    document.getElementById(id + '-window').value = w;
+    document.getElementById(id + '-middle').value = m;
+    document.getElementById(id + '-aisle').value = a;
+  };
+  window.saveSeatMap = async function(type) {
+    const id = seatId(type);
+    const read = (k) => [...new Set(document.getElementById(`${id}-${k}`).value.toUpperCase().replace(/[^A-Z]/g, ''))].join('');
+    const layout = { window: read('window'), middle: read('middle'), aisle: read('aisle') };
+    const all = layout.window + layout.middle + layout.aisle;
+    if (!all) { alert('Bitte mindestens bei Fenster oder Gang Buchstaben eintragen — oder eine Vorlage wählen.'); return; }
+    if (new Set(all).size !== all.length) { alert('Ein Buchstabe darf nur einer Sitzart zugeordnet sein.'); return; }
+    settings.seatMaps = { ...(settings.seatMaps || {}), [type]: layout };
+    await saveSettings();
+    render();
+  };
+  window.resetSeatMap = async function(type) {
+    const m = { ...(settings.seatMaps || {}) };
+    delete m[type];
+    settings.seatMaps = m;
+    await saveSettings();
+    render();
+  };
+
   function renderStats() {
     const el = document.getElementById('stats-body');
     if (!el || !window.MMMap) return;
@@ -347,8 +409,8 @@
       `<div style="display:flex; height:12px; border-radius:6px; overflow:hidden; margin-top:6px;">${Object.keys(clsLabel).filter(c => classes[c]).map(c => `<div style="width:${classes[c] / totalSeg * 100}%; background:${clsColor[c]};" title="${clsLabel[c]}"></div>`).join('')}</div>
        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:6px; font-size:11.5px; color:var(--muted);">${Object.keys(clsLabel).filter(c => classes[c]).map(c => `<span><span style="display:inline-block; width:9px; height:9px; border-radius:50%; background:${clsColor[c]}; margin-right:4px;"></span>${clsLabel[c]} ${Math.round(classes[c] / totalSeg * 100)} %</span>`).join('')}</div>`);
 
-    // Flugzeuge & Sitze: nur Teilstrecken, für die Details hinterlegt sind
-    const legInfos = flown.flatMap(tripFlightInfos);
+    // Flugzeuge & Sitze: nur Teilstrecken, für die Details hinterlegt sind und die die Teilstrecken-Filter erfüllen
+    const legInfos = getFilteredLegs().map(x => x.f);
     const tally = (key, norm = x => x) => {
       const m = new Map();
       legInfos.forEach(f => { const v = norm((f[key] || '').trim()); if (v) m.set(v, (m.get(v) || 0) + 1); });
@@ -375,11 +437,23 @@
       html += block('Kennzeichen (am häufigsten)', rep.size ? asBars(rep, 5) : (tails.size ? '<div class="hint" style="margin:4px 0 0;">Noch kein Flugzeug mehrfach geflogen.</div>' : ''));
       html += block('Sitzplätze (am häufigsten)', asBars(seats, 5));
       html += block('Sitzbuchstaben', asBars(letters, 6));
+
+      // Sitzart (Fenster/Mitte/Gang) nach der Typ-Regel; Typen ohne bestätigte Anordnung werden abgefragt
+      const withSeat = legInfos.filter(f => f.seat);
+      const kinds = new Map();
+      withSeat.forEach(f => { const k = seatKind(f); if (k) kinds.set(SEAT_KINDS[k], (kinds.get(SEAT_KINDS[k]) || 0) + 1); });
+      const unknownTypes = new Map();   // Typ -> Sitze
+      withSeat.filter(f => !seatKind(f)).forEach(f => {
+        const t = (f.aircraft || '').trim().toUpperCase() || '(Typ fehlt)';
+        (unknownTypes.get(t) || unknownTypes.set(t, []).get(t)).push(f.seat);
+      });
+      html += block(`Sitzart (${[...kinds.values()].reduce((a, b) => a + b, 0)} von ${withSeat.length} Sitzen zugeordnet)`, asBars(kinds, 3));
+      html += seatRuleBlock(unknownTypes);
     }
 
-    // Je Jahr: alle geflogenen Trips, unabhängig vom Jahresfilter
+    // Je Jahr: alle geflogenen Trips, unabhängig vom Jahresfilter (die übrigen Filter gelten)
     const byYear = {};
-    trips.filter(t => !t.planned && t.date).forEach(t => {
+    getFilteredTrips({ ignoreYear: true }).filter(t => !t.planned && t.date).forEach(t => {
       const y = t.date.slice(0, 4);
       const b = (byYear[y] = byYear[y] || { n: 0, seg: 0, km: 0, p: 0, q: 0, c: 0 });
       b.n += 1; b.seg += t.segments || 0; b.km += MMMap.tripKm(t); b.p += tripPoints(t); b.q += tripQP(t); b.c += t.cost || 0;

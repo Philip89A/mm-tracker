@@ -271,14 +271,21 @@
   </section>
 
   <!-- TAB: TRIPS -->
-  <section id="tab-trips" class="section">
+  <section id="tab-trips" class="section" data-page="over">
 
-    <div class="card" id="card-map">
-      <div class="flex-between">
-        <h2 style="margin:0;">🗺️ Streckenkarte</h2>
-        <button type="button" class="btn small secondary" id="map-fullscreen-btn">⤢ Vollbild</button>
+    <div class="subnav" id="trips-subnav">
+      <button type="button" data-tp="over" class="active">📊 Übersicht</button>
+      <button type="button" data-tp="log">🧾 Trip-Log</button>
+      <button type="button" data-tp="add">➕ Erfassen</button>
+    </div>
+
+    <div class="card tp tp-over tp-log" id="card-filters">
+      <details id="tf-details">
+      <summary class="tf-summary"><span>🔎 Filter <span class="badge" id="tf-active" style="display:none;"></span></span><span class="hint" id="tf-summary-note" style="margin:0;"></span></summary>
+      <div style="display:flex; justify-content:flex-end; margin-top:8px;">
+        <button type="button" class="btn small secondary" id="tf-reset">Filter zurücksetzen</button>
       </div>
-      <p class="hint" style="margin:6px 0 8px;">Die Filter gelten für Karte <b>und</b> Trip-Log darunter. Ziehen = verschieben, Mausrad/Zwei-Finger-Geste/+ − = zoomen. Dunkelblau = besuchte Länder, hellblau = nur geplant.</p>
+      <p class="hint" style="margin:6px 0 8px;">Gelten gemeinsam für Karte, Statistik und Trip-Log. Flughafen und Land gelten für irgendeinen Punkt der Strecke; Flugzeug, Kennzeichen, Kabine und Sitzart beziehen sich auf die hinterlegten Flugdetails (Suche: Flugnummer, Kennzeichen oder Sitz).</p>
       <div class="row2">
         <div>
           <label style="margin-top:0;">Jahr</label>
@@ -299,8 +306,24 @@
           <select id="tf-airline"><option value="">Alle</option></select>
         </div>
         <div>
-          <label>Flughafen (irgendwo auf der Strecke)</label>
+          <label>Flughafen</label>
           <select id="tf-airport"><option value="">Alle</option></select>
+        </div>
+      </div>
+      <div class="row2">
+        <div>
+          <label>Land</label>
+          <select id="tf-country"><option value="">Alle</option></select>
+        </div>
+        <div>
+          <label>Kabine / Klasse</label>
+          <select id="tf-class">
+            <option value="">Alle</option>
+            <option value="economy">Economy</option>
+            <option value="premium">Premium Economy</option>
+            <option value="business">Business</option>
+            <option value="first">First</option>
+          </select>
         </div>
       </div>
       <div class="row2">
@@ -309,10 +332,36 @@
           <select id="tf-aircraft"><option value="">Alle</option></select>
         </div>
         <div>
-          <label>Suche (Flugnr., Kennzeichen, Sitz)</label>
+          <label>Kennzeichen</label>
+          <select id="tf-reg"><option value="">Alle</option></select>
+        </div>
+      </div>
+      <div class="row2">
+        <div>
+          <label>Sitzart</label>
+          <select id="tf-seatkind">
+            <option value="">Alle</option>
+            <option value="window">Fenster</option>
+            <option value="middle">Mitte</option>
+            <option value="aisle">Gang</option>
+            <option value="unknown">ohne Zuordnung</option>
+          </select>
+        </div>
+        <div>
+          <label>Suche</label>
           <input type="search" id="tf-search" placeholder="z.B. LH1418, D-AIWA, 15A" autocomplete="off">
         </div>
       </div>
+      <p class="hint" id="tf-note" style="margin:8px 0 0;"></p>
+      </details>
+    </div>
+
+    <div class="card tp tp-over" id="card-map">
+      <div class="flex-between">
+        <h2 style="margin:0;">🗺️ Streckenkarte</h2>
+        <button type="button" class="btn small secondary" id="map-fullscreen-btn">⤢ Vollbild</button>
+      </div>
+      <p class="hint" style="margin:6px 0 8px;">Ziehen = verschieben, Mausrad/Zwei-Finger-Geste/+ − = zoomen. Dunkelblau = besuchte Länder, hellblau = nur geplant.</p>
       <div class="map-wrap" style="margin-top:10px;">
         <div id="route-map" class="route-map"></div>
         <div class="map-controls">
@@ -326,7 +375,19 @@
       <p class="hint" id="route-map-unknown" style="display:none;"></p>
     </div>
 
-    <div class="card">
+    <div class="card tp tp-over" id="card-stats">
+      <h2>📊 Statistik</h2>
+      <p class="hint" style="margin-top:0;">Gilt für alle Filter oben (nur bereits geflogene, nicht geplante Trips — auch historisch markierte). Points/QP hier sind reine Trip-Summen, also ohne Basiswert, Hotels, Hebel und Boden-Punkte; die offiziellen Stände zeigen Dashboard und Jahresvergleich. Die Tabelle „Je Jahr“ ignoriert nur den Jahresfilter.</p>
+      <div id="stats-body"><div class="empty">Noch keine Trips erfasst.</div></div>
+    </div>
+
+    <div class="card tp tp-over">
+      <h2>📈 Jahresvergleich Points/QP</h2>
+      <p class="hint" style="margin-top:0;">Gleiche Zählweise wie Dashboard und Kontoabgleich: Trips, erledigte Hotels, Uptrip, Hebel und Boden-Punkte je Kalenderjahr, im laufenden Jahr inkl. Basiswert. Geplantes steht hell darüber, historisch markierte Trips (zählen bewusst nicht ins Dashboard) grau. Die Zahl über dem Balken ist der erzielte Stand.</p>
+      <div id="year-chart"></div>
+    </div>
+
+    <div class="card tp tp-log">
       <h2>🧾 Trip-Log <span class="badge" id="trip-count">0</span></h2>
       <label style="margin-top:0;">Sortieren nach</label>
       <select id="trip-sort">
@@ -344,7 +405,7 @@
       <button type="button" class="btn secondary" style="margin-top:12px;" onclick="exportTripsCsv()">⬇️ Trip-Log als CSV exportieren</button>
     </div>
 
-    <div class="card">
+    <div class="card tp tp-add">
       <h2>➕ Trip hinzufügen</h2>
       <form id="trip-form">
         <div class="row2">
@@ -467,7 +528,7 @@
       <div id="trip-preview" class="hint"></div>
     </div>
 
-    <div class="card">
+    <div class="card tp tp-add">
       <h2>🏨 Geplante Hotelaufenthalte <span class="badge" id="planned-hotels-count">0</span></h2>
       <p class="hint" style="margin-top:0;">Punkte hier sind Schätzwerte (z.B. aus dem Marriott-Umwandlungsrechner) und zählen zunächst als "geplant", nicht als erzielt. Sobald der Aufenthalt tatsächlich stattgefunden hat, per Klick auf "✅ War tatsächlich so" live schalten — die Punkte zählen danach als erzielt. Die tatsächlichen Meilen trägst du wie gewohnt separat im Meilen-Tab (Kategorie "Hotel") ein.</p>
       <form id="planned-hotel-form">
@@ -487,18 +548,6 @@
         <button type="button" class="btn secondary" id="planned-hotel-cancel-btn" style="display:none;" onclick="cancelEditPlannedHotel()">Bearbeiten abbrechen</button>
       </form>
       <div id="planned-hotels-list" style="margin-top:10px;"><div class="empty">Noch keine geplanten Aufenthalte erfasst.</div></div>
-    </div>
-
-    <div class="card">
-      <h2>📈 Jahresvergleich Points/QP</h2>
-      <p class="hint" style="margin-top:0;">Gleiche Zählweise wie Dashboard und Kontoabgleich: Trips, erledigte Hotels, Uptrip, Hebel und Boden-Punkte je Kalenderjahr, im laufenden Jahr inkl. Basiswert. Geplantes steht hell darüber, historisch markierte Trips (zählen bewusst nicht ins Dashboard) grau. Die Zahl über dem Balken ist der erzielte Stand.</p>
-      <div id="year-chart"></div>
-    </div>
-
-    <div class="card" id="card-stats">
-      <h2>📊 Statistik</h2>
-      <p class="hint" style="margin-top:0;">Gilt für die Filter über der Karte (alle bereits geflogenen, nicht geplanten Trips — auch historisch markierte). Points/QP hier sind reine Trip-Summen, also ohne Basiswert, Hotels, Hebel und Boden-Punkte; die offiziellen Stände zeigen Dashboard und Jahresvergleich. Der Vergleich je Jahr unten ignoriert den Jahresfilter.</p>
-      <div id="stats-body"><div class="empty">Noch keine Trips erfasst.</div></div>
     </div>
   </section>
 
@@ -544,8 +593,15 @@
   </section>
 
   <!-- TAB: RECHNER -->
-  <section id="tab-rechner" class="section">
+  <section id="tab-rechner" class="section" data-page="plan">
 
+    <div class="subnav" id="rechner-subnav">
+      <button type="button" data-rp="plan" class="active">🧭 Planer</button>
+      <button type="button" data-rp="sim">🧪 Simulation</button>
+      <button type="button" data-rp="value">💰 Wertrechner</button>
+    </div>
+
+    <div class="rp rp-plan">
     <div class="card" id="card-planner">
       <h2>🧭 Streckenplaner</h2>
       <p class="hint" style="margin-top:0;">Zeigt, welche Routen über die Lufthansa-Group-Drehkreuze möglich wären und wie viele Points/QP sie bringen — auch die punkteoptimale Variante mit Umstieg. <b>Keine Fahrplan-, Verfügbarkeits- oder Preisdaten:</b> ob eine Teilstrecke wirklich beflogen wird, zeigen die Links zu Google Flights. Die Reichweite wird nach Kontinent geschätzt (Europa ↔ Europa = kontinental); bei Sonderfällen wie Kanaren oder Israel bitte im Trip prüfen.</p>
@@ -619,6 +675,105 @@
       </div>
     </div>
 
+    </div>
+
+    <div class="rp rp-sim">
+      <div class="card" id="card-sim">
+        <h2>🧪 Simulation: Was wäre wenn?</h2>
+        <p class="hint" style="margin-top:0;">Rechne durch, wo du landest, wenn du bestimmte Flüge machst oder Hebel nutzt. Das Szenario ändert <b>nichts</b> an deinen Daten — nur wenn du es unten ausdrücklich als geplante Trips übernimmst oder speicherst.</p>
+        <div class="subcard">
+          <div class="flex-between"><span>Saison: <b id="sim-year"></b></span><span class="hint" style="margin:0;">wie im Dashboard gewählt</span></div>
+          <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-weight:600; color:var(--text);">
+            <input type="checkbox" id="sim-planned" style="width:auto;" checked> Bereits geplante Flüge &amp; Hotels einrechnen
+          </label>
+        </div>
+
+        <h3 class="sim-h">Flüge im Szenario</h3>
+        <div class="row2">
+          <div>
+            <label style="margin-top:0;">Strecke (optional, z.B. FRA–OTP–FRA)</label>
+            <input type="text" id="sim-route" placeholder="FRA–OTP" autocomplete="off">
+          </div>
+          <div>
+            <label style="margin-top:0;">Reichweite</label>
+            <select id="sim-range">
+              <option value="auto">Automatisch aus Strecke</option>
+              <option value="continental">Kontinental (Europa)</option>
+              <option value="intercontinental">Interkontinental</option>
+            </select>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>Klasse</label>
+            <select id="sim-class">
+              <option value="economy">Economy</option>
+              <option value="premium">Premium Economy</option>
+              <option value="business">Business</option>
+              <option value="first">First</option>
+            </select>
+          </div>
+          <div>
+            <label>CO₂-Kompensation?</label>
+            <select id="sim-co2">
+              <option value="0">Nein</option>
+              <option value="30">Ja, ~30% Bonus</option>
+              <option value="80" selected>Ja, ~80% Bonus</option>
+            </select>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>Segmente je Flug (Hin+Rück = 2)</label>
+            <input type="number" id="sim-segments" value="1" min="1">
+          </div>
+          <div>
+            <label>Wiederholungen (× mal)</label>
+            <input type="number" id="sim-count" value="1" min="1">
+          </div>
+        </div>
+        <label>Sammelart</label>
+        <select id="sim-mode">
+          <option value="">Lufthansa Group (Points + QP)</option>
+          <option value="pointsOnly">Partner (nur Points, keine QP)</option>
+        </select>
+        <button type="button" class="btn secondary" id="sim-add-btn">➕ Zum Szenario hinzufügen</button>
+        <p class="hint" id="sim-add-msg" style="margin:6px 0 0;"></p>
+        <div id="sim-flights" style="margin-top:8px;"></div>
+
+        <h3 class="sim-h">Hebel &amp; Zusätze</h3>
+        <label style="display:flex; align-items:center; gap:8px; margin-top:0; font-weight:600; color:var(--text);">
+          <input type="checkbox" id="sim-lever800" style="width:auto;"> 800-QP-Meilentausch (ab 800 QP: bis 20.000 Meilen → +125 P / +125 QP)
+        </label>
+        <label>Kreditkarten-Meilen-Tausch (5.000er-Schritte, 250 Meilen = 1 P + 1 QP)</label>
+        <input type="range" id="sim-cc" min="0" max="25000" step="5000" value="0">
+        <p class="hint" id="sim-cc-hint" style="margin:2px 0 0;"></p>
+        <div class="row2">
+          <div><label>Zusätzliche Points (z.B. Hotel, Partner)</label><input type="number" id="sim-extra-p" min="0" placeholder="0"></div>
+          <div><label>Zusätzliche QP</label><input type="number" id="sim-extra-q" min="0" placeholder="0"></div>
+        </div>
+      </div>
+
+      <div class="card" id="card-sim-result">
+        <h2>📈 Ergebnis</h2>
+        <div id="sim-result"></div>
+      </div>
+
+      <div class="card" id="card-sim-actions">
+        <h2>💾 Szenario übernehmen oder speichern</h2>
+        <label style="margin-top:0;">Datum für geplante Trips</label>
+        <input type="date" id="sim-date">
+        <button type="button" class="btn secondary" id="sim-adopt-btn">📅 Flüge als geplante Trips übernehmen</button>
+        <p class="hint" id="sim-adopt-msg" style="margin:6px 0 0;"></p>
+        <div class="row2">
+          <div><label>Name des Szenarios</label><input type="text" id="sim-name" placeholder="z.B. Senator mit 3 Asienflügen"></div>
+          <div style="align-self:end;"><button type="button" class="btn secondary" id="sim-save-btn">Szenario speichern</button></div>
+        </div>
+        <div id="sim-saved" style="margin-top:8px;"></div>
+      </div>
+    </div>
+
+    <div class="rp rp-value">
     <div class="card">
       <h2>💰 Wertrechner: €/Point & €/QP</h2>
       <p class="hint" style="margin-top:0;">Trag eine Ausgabe ein — berechnet Kosten pro Point und pro Qualifying Point, sortiert nach bestem Wert.</p>
@@ -655,6 +810,7 @@
       <h2>🗄️ Archiv: frühere Upgrade-Einträge <span class="badge" id="upg-count">0</span></h2>
       <p class="hint" style="margin-top:0;">Upgrades erfasst du jetzt direkt im Trip (Tab Trips). Diese älteren Einzel-Einträge bleiben nur zur Ansicht erhalten und fließen nirgends in die Summen ein.</p>
       <div id="upg-list"></div>
+    </div>
     </div>
 
   </section>
@@ -834,6 +990,7 @@
 <script src="js/app.js"></script>
 <script src="js/map.js"></script>
 <script src="js/extras.js"></script>
+<script src="js/sim.js"></script>
 <script src="js/auth.js"></script>
 </body>
 </html>

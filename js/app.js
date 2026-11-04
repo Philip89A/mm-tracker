@@ -480,6 +480,7 @@ function render() {
     renderLevers,
     (typeof renderReconcile === 'function' ? renderReconcile : function renderReconcile() {}),
     (typeof renderVouchers === 'function' ? renderVouchers : function renderVouchers() {}),
+    (typeof renderSim === 'function' ? renderSim : function renderSim() {}),
     (typeof renderYearPlan === 'function' ? renderYearPlan : function renderYearPlan() {}),
     (typeof renderStats === 'function' ? renderStats : function renderStats() {}),
     (typeof renderBackupStatus === 'function' ? renderBackupStatus : function renderBackupStatus() {}),
@@ -711,7 +712,15 @@ function parseRoute(route) {
 
 function tripAirportCodes(t) { return parseRoute(t.route).known; }
 
-// Filter-Leiste über der Karte (tf-*): gilt gemeinsam für Karte und Trip-Log.
+// Filter-Karte im Trips-Tab (tf-*): gilt gemeinsam für Karte, Statistik und Trip-Log.
+const regionNames = (typeof Intl !== 'undefined' && Intl.DisplayNames) ? new Intl.DisplayNames(['de'], { type: 'region' }) : null;
+function countryLabel(iso) {
+  try { return (regionNames && regionNames.of(iso)) || iso; } catch (e) { return iso; }
+}
+function tripCountries(t) { return [...new Set(tripAirportCodes(t).map(c => AIRPORTS[c][3]))]; }
+
+const CABIN_TO_CLASS = { E: 'economy', W: 'premium', B: 'business', F: 'first' };
+
 function populateTripFilters() {
   const fill = (id, html) => {
     const sel = document.getElementById(id);
@@ -719,38 +728,87 @@ function populateTripFilters() {
     sel.innerHTML = html;
     if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
   };
+  const opt = (v, l) => `<option value="${escHtml(v)}">${escHtml(l ?? v)}</option>`;
   const years = [...new Set(trips.map(t => (t.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
-  fill('tf-year', '<option value="">Alle</option>' + years.map(y => `<option value="${y}">${y}</option>`).join(''));
+  fill('tf-year', '<option value="">Alle</option>' + years.map(y => opt(y)).join(''));
   const airlines = [...new Set(trips.map(t => (t.airline || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
-  fill('tf-airline', '<option value="">Alle</option>' + airlines.map(a => `<option value="${escHtml(a)}">${escHtml(a)}</option>`).join('') +
+  fill('tf-airline', '<option value="">Alle</option>' + airlines.map(a => opt(a)).join('') +
     (trips.some(t => !(t.airline || '').trim()) ? '<option value="__none">(ohne Angabe)</option>' : ''));
   const airports = [...new Set(trips.flatMap(tripAirportCodes))].sort();
-  fill('tf-airport', '<option value="">Alle</option>' + airports.map(c => `<option value="${c}">${c} · ${escHtml(AIRPORTS[c][2])}</option>`).join(''));
-  const types = [...new Set(trips.flatMap(tripFlightInfos).map(f => (f.aircraft || '').trim().toUpperCase()).filter(Boolean))].sort();
-  fill('tf-aircraft', '<option value="">Alle</option>' + types.map(a => `<option value="${escHtml(a)}">${escHtml(a)}</option>`).join(''));
+  fill('tf-airport', '<option value="">Alle</option>' + airports.map(c => opt(c, `${c} · ${AIRPORTS[c][2]}`)).join(''));
+  const countries = [...new Set(trips.flatMap(tripCountries))].sort((a, b) => countryLabel(a).localeCompare(countryLabel(b), 'de'));
+  fill('tf-country', '<option value="">Alle</option>' + countries.map(c => opt(c, countryLabel(c))).join(''));
+  const legs = trips.flatMap(tripFlightInfos);
+  const types = [...new Set(legs.map(f => (f.aircraft || '').trim().toUpperCase()).filter(Boolean))].sort();
+  fill('tf-aircraft', '<option value="">Alle</option>' + types.map(a => opt(a)).join(''));
+  const regs = [...new Set(legs.map(f => (f.registration || '').trim().toUpperCase()).filter(Boolean))].sort();
+  fill('tf-reg', '<option value="">Alle</option>' + regs.map(a => opt(a)).join(''));
 }
 
-function getFilteredTrips() {
-  const y = document.getElementById('tf-year').value;
-  const st = document.getElementById('tf-status').value;
-  const al = document.getElementById('tf-airline').value;
-  const ap = document.getElementById('tf-airport').value;
-  const ac = document.getElementById('tf-aircraft').value;
-  const q = document.getElementById('tf-search').value.trim().toUpperCase().replace(/\s+/g, '');
-  return trips.filter(t =>
-    (!y || (t.date || '').startsWith(y)) &&
-    (!st || (st === 'planned' ? !!t.planned : !t.planned)) &&
-    (!al || (al === '__none' ? !(t.airline || '').trim() : (t.airline || '').trim() === al)) &&
-    (!ap || tripAirportCodes(t).includes(ap)) &&
-    (!ac || tripFlightInfos(t).some(f => (f.aircraft || '').trim().toUpperCase() === ac)) &&
-    (!q || tripFlightInfos(t).some(f => [f.flightNo, f.registration, f.seat].some(v => String(v || '').toUpperCase().replace(/\s+/g, '').includes(q))))
-  );
+function readTripFilters() {
+  const v = (id) => document.getElementById(id).value;
+  return {
+    year: v('tf-year'), status: v('tf-status'), airline: v('tf-airline'), airport: v('tf-airport'), country: v('tf-country'),
+    cls: v('tf-class'), aircraft: v('tf-aircraft'), reg: v('tf-reg'), seatKind: v('tf-seatkind'),
+    q: v('tf-search').trim().toUpperCase().replace(/\s+/g, '')
+  };
+}
+
+// Teilstrecken-Filter (Flugzeug, Kennzeichen, Kabine, Sitzart, Suche). Kabine: laut Flugdaten, sonst Klasse des Trips.
+function legMatchesFilters(f, t, F) {
+  if (F.aircraft && String(f.aircraft || '').trim().toUpperCase() !== F.aircraft) return false;
+  if (F.reg && String(f.registration || '').trim().toUpperCase() !== F.reg) return false;
+  if (F.cls && (CABIN_TO_CLASS[f.cabin] || t.cls) !== F.cls) return false;
+  if (F.seatKind) {
+    if (!f.seat) return false;
+    const k = seatKind(f);
+    if (F.seatKind === 'unknown' ? k !== null : k !== F.seatKind) return false;
+  }
+  if (F.q && ![f.flightNo, f.registration, f.seat].some(x => String(x || '').toUpperCase().replace(/\s+/g, '').includes(F.q))) return false;
+  return true;
+}
+const hasLegFilter = (F) => !!(F.aircraft || F.reg || F.cls || F.seatKind || F.q);
+
+function tripMatchesFilters(t, F, ignoreYear) {
+  if (!ignoreYear && F.year && !(t.date || '').startsWith(F.year)) return false;
+  if (F.status && (F.status === 'planned' ? !t.planned : !!t.planned)) return false;
+  if (F.airline && (F.airline === '__none' ? (t.airline || '').trim() : (t.airline || '').trim() !== F.airline)) return false;
+  if (F.airport && !tripAirportCodes(t).includes(F.airport)) return false;
+  if (F.country && !tripCountries(t).includes(F.country)) return false;
+  if (hasLegFilter(F)) {
+    // Trips ohne Flugdetails zählen nur bei reinem Klassenfilter (über die Klasse des Trips).
+    const legs = tripFlightInfos(t);
+    const pool = legs.length ? legs : (F.cls && !(F.aircraft || F.reg || F.seatKind || F.q) ? [{}] : []);
+    if (!pool.some(f => legMatchesFilters(f, t, F))) return false;
+  }
+  return true;
+}
+
+function getFilteredTrips(opts = {}) {
+  const F = readTripFilters();
+  return trips.filter(t => tripMatchesFilters(t, F, !!opts.ignoreYear));
+}
+
+// Teilstrecken mit Flugdetails aus den gefilterten, geflogenen Trips — nur die, die auch die Teilstrecken-Filter erfüllen.
+function getFilteredLegs() {
+  const F = readTripFilters();
+  return getFilteredTrips().filter(t => !t.planned).flatMap(t => tripFlightInfos(t).filter(f => legMatchesFilters(f, t, F)).map(f => ({ f, t })));
+}
+
+function resetTripFilters() {
+  ['tf-year', 'tf-status', 'tf-airline', 'tf-airport', 'tf-country', 'tf-class', 'tf-aircraft', 'tf-reg', 'tf-seatkind'].forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('tf-search').value = '';
+  refreshTripFilters();
 }
 
 function renderTrips() {
   const list = document.getElementById('trip-list');
   document.getElementById('trip-count').textContent = trips.length;
   populateTripFilters();
+  const activeF = ['tf-year', 'tf-status', 'tf-airline', 'tf-airport', 'tf-country', 'tf-class', 'tf-aircraft', 'tf-reg', 'tf-seatkind', 'tf-search'].filter(id => document.getElementById(id).value).length;
+  const badge = document.getElementById('tf-active');
+  badge.textContent = activeF;
+  badge.style.display = activeF ? '' : 'none';
 
   const upgSummaryEl = document.getElementById('trip-upgrade-summary');
   const noteEl = document.getElementById('trip-filter-note');
@@ -764,7 +822,8 @@ function renderTrips() {
     return;
   }
   const filtered = getFilteredTrips();
-  if (filtered.length !== trips.length) noteEl.textContent = `${filtered.length} von ${trips.length} Trips (Filter über der Karte).`;
+  if (filtered.length !== trips.length) noteEl.textContent = `${filtered.length} von ${trips.length} Trips (Filter oben).`;
+  document.getElementById('tf-note').textContent = filtered.length !== trips.length ? `${filtered.length} von ${trips.length} Trips erfüllen die Filter.` : '';
   if (filtered.length === 0) {
     list.innerHTML = '<div class="empty">Keine Trips für diesen Filter.</div>';
     return;
@@ -2098,8 +2157,33 @@ function tripFlightInfos(t) {
 }
 
 function flightInfoText(f) {
-  return [f.flightNo, (f.from && f.to) ? `${f.from}–${f.to}` : '', f.aircraft, f.registration, f.seat ? 'Sitz ' + f.seat : '',
+  const kind = seatKind(f);
+  return [f.flightNo, (f.from && f.to) ? `${f.from}–${f.to}` : '', f.aircraft, f.registration, f.seat ? `Sitz ${f.seat}${kind ? ' (' + SEAT_KINDS[kind] + ')' : ''}` : '',
     f.cabin ? (CABIN_LABELS[f.cabin] || f.cabin) : '', f.duration].filter(Boolean).join(' · ');
+}
+
+// ---------- Sitzart: Fenster / Mitte / Gang ----------
+// Regel: Airbus A319/A320/A321 (auch neo: A19N/A20N/A21N) haben 3-3-Bestuhlung —
+// A und F = Fenster, B und E = Mitte, C und D = Gang. Für alle anderen Typen gilt die
+// Zuordnung nur, wenn sie in der Statistik bestätigt wurde (settings.seatMaps).
+const SEAT_KINDS = { window: 'Fenster', middle: 'Mitte', aisle: 'Gang' };
+const SEAT_DEFAULT_TYPES = ['A319', 'A320', 'A321', 'A19N', 'A20N', 'A21N'];
+const SEAT_DEFAULT_LAYOUT = { window: 'AF', middle: 'BE', aisle: 'CD' };
+
+function seatLayoutFor(type) {
+  const t = String(type || '').trim().toUpperCase();
+  if (!t) return null;
+  const custom = settings.seatMaps && settings.seatMaps[t];
+  if (custom) return custom;
+  return SEAT_DEFAULT_TYPES.includes(t) ? SEAT_DEFAULT_LAYOUT : null;
+}
+
+// 'window' | 'middle' | 'aisle' oder null, wenn Sitz fehlt oder die Anordnung des Typs nicht geklärt ist.
+function seatKind(f) {
+  const m = /([A-Z])$/.exec(String(f.seat || '').trim().toUpperCase());
+  const layout = m && seatLayoutFor(f.aircraft);
+  if (!layout) return null;
+  return Object.keys(SEAT_KINDS).find(k => (layout[k] || '').includes(m[1])) || null;
 }
 
 const FLIGHT_ROW_FIELDS = [
@@ -2175,6 +2259,7 @@ window.startEditTrip = function(idx) {
   document.getElementById('trip-submit-btn').textContent = 'Änderungen speichern';
   document.getElementById('trip-cancel-btn').style.display = 'block';
   document.querySelector('[data-tab="tab-trips"]').click();
+  setTripsPage('add');
   document.getElementById('t-date').scrollIntoView({ behavior: 'smooth', block: 'center' });
 };
 
@@ -2332,12 +2417,26 @@ document.getElementById('mi-category').addEventListener('change', () => {
 
 document.getElementById('mi-filter-category').addEventListener('change', renderMiles);
 document.getElementById('mi-filter-year').addEventListener('change', renderMiles);
-const refreshTripFilters = () => {
+// Filter geändert: Trip-Log, Karte und Statistik zugleich neu aufbauen.
+function refreshTripFilters() {
   renderTrips();
   if (typeof renderRouteMap === 'function') renderRouteMap();
-};
-['tf-year', 'tf-status', 'tf-airline', 'tf-airport', 'tf-aircraft'].forEach(id => document.getElementById(id).addEventListener('change', refreshTripFilters));
+  if (typeof renderStats === 'function') renderStats();
+}
+['tf-year', 'tf-status', 'tf-airline', 'tf-airport', 'tf-country', 'tf-class', 'tf-aircraft', 'tf-reg', 'tf-seatkind'].forEach(id => document.getElementById(id).addEventListener('change', refreshTripFilters));
 document.getElementById('tf-search').addEventListener('input', refreshTripFilters);
+document.getElementById('tf-reset').addEventListener('click', resetTripFilters);
+
+// Unterseiten im Trips-Tab: Übersicht (Karte + Statistik), Trip-Log, Erfassen.
+function setTripsPage(page) {
+  const sec = document.getElementById('tab-trips');
+  sec.dataset.page = page;
+  document.querySelectorAll('#trips-subnav button').forEach(b => b.classList.toggle('active', b.dataset.tp === page));
+  try { localStorage.setItem('mm_trips_page', page); } catch (e) { /* ohne Speicher egal */ }
+  if (page === 'over' && typeof renderRouteMap === 'function') renderRouteMap();
+}
+document.querySelectorAll('#trips-subnav button').forEach(b => b.addEventListener('click', () => setTripsPage(b.dataset.tp)));
+try { const p = localStorage.getItem('mm_trips_page'); if (p) setTripsPage(p); } catch (e) { /* ignorieren */ }
 document.getElementById('trip-sort').addEventListener('change', renderTrips);
 
 // Bei eindeutig bekannten Airlines die Sammelart vorschlagen (bleibt änderbar).
