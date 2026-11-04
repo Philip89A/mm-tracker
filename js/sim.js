@@ -49,13 +49,15 @@
   const upKey = (u) => String(u.name || '').trim().toLowerCase();
   const upRemaining = (u) => Math.max(0, (u.maxRedemptions || 1) - (u.redemptionCount || 0));
   function uptripEffect() {
-    let p = 0, q = 0, n = 0;
+    let p = 0, q = 0, m = 0, n = 0;
+    const others = [];
     uptripItems.forEach(u => {
       const c = Math.min(upCounts[upKey(u)] || 0, upRemaining(u));
-      p += (u.rewardPoints || 0) * c; q += (u.rewardQP || 0) * c; n += c;
+      p += (u.rewardPoints || 0) * c; q += (u.rewardQP || 0) * c; m += (u.rewardMeilen || 0) * c; n += c;
+      if (c && u.rewardOther) others.push(`${c}× ${u.name}: ${u.rewardOther}`);
     });
     upCustom.forEach(c => { p += c.p * c.count; q += c.q * c.count; n += c.count; });
-    return { p, q, n };
+    return { p, q, m, n, others };
   }
 
   function simulate() {
@@ -74,7 +76,10 @@
     const swapUsed = leverSwapUsed(year);
     const swapOk = swapWanted && !swapUsed && q >= 800;
     if (swapOk) { p += 125; q += 125; }
-    return { year, base, fl, extra, up, cc, ccMiles, swapWanted, swapUsed, swapOk, total: { p, q } };
+    // Meilen-Pool: Uptrip-Prämien kommen dazu, getauschte Meilen gehen ab (beim 800-QP-Tausch maximal 20.000).
+    const swapMiles = swapOk ? 20000 : 0;
+    const miles = { base: ach.m, up: up.m, out: ccMiles + swapMiles, total: ach.m + up.m - ccMiles - swapMiles };
+    return { year, base, fl, extra, up, cc, ccMiles, swapWanted, swapUsed, swapOk, miles, total: { p, q } };
   }
 
   // ---------- Darstellung ----------
@@ -91,13 +96,74 @@
     }).join('') : '<div class="hint" style="margin:4px 0 0;">Noch keine Flüge im Szenario.</div>';
   }
 
+  // ---------- Flugbedarf: wie viele weitere Segmente bis zum Ziel, je Variante ----------
+  const DEFAULT_VARIANTS = [
+    { id: 'd1', name: 'Nur Economy', range: 'continental', biz: 0, co2: 0 },
+    { id: 'd2', name: 'Nur Economy + CO₂-Kompensation', range: 'continental', biz: 0, co2: 80 },
+    { id: 'd3', name: '25 % Business, Rest Economy (mit CO₂)', range: 'continental', biz: 25, co2: 80 },
+    { id: 'd4', name: '50 % Business, Rest Economy (mit CO₂)', range: 'continental', biz: 50, co2: 80 },
+    { id: 'd5', name: 'Nur Business (mit CO₂)', range: 'continental', biz: 100, co2: 80 },
+    { id: 'd6', name: 'Interkontinental Economy (mit CO₂)', range: 'intercontinental', biz: 0, co2: 80 },
+    { id: 'd7', name: 'Interkontinental Business (mit CO₂)', range: 'intercontinental', biz: 100, co2: 80 }
+  ];
+  const allVariants = () => [...DEFAULT_VARIANTS, ...(settings.simVariants || [])];
+  const variantAvg = (v) => {
+    const s = v.biz / 100;
+    return (1 - s) * segmentPointsWithCo2(v.range, 'economy', v.co2) + s * segmentPointsWithCo2(v.range, 'business', v.co2);
+  };
+
+  function renderNeed() {
+    const el = $('sim-need');
+    if (!el) return;
+    const r = simulate();
+    const open = GOAL_LADDER.filter(g => !g.reached(r.total));
+    if (!open.length) { el.innerHTML = '<div class="empty">🎉 Mit diesem Szenario sind alle Ziele der Saison erreicht — es sind keine weiteren Flüge nötig.</div>'; renderCustomVariants(); return; }
+    const short = (g) => Math.max(g.pTarget ? Math.max(0, g.pTarget - r.total.p) : 0, Math.max(0, g.qTarget - r.total.q));
+    const now = new Date();
+    const monthsLeft = String(r.year) === String(now.getFullYear()) ? Math.max(0.5, (new Date(now.getFullYear(), 11, 31) - now) / 86400000 / 30.4) : 0;
+    const head = open.map((g, i) => `<th>${i === 0 ? '🎯 ' : ''}${esc(g.shortLabel)}<div style="font-weight:400; font-size:11px; color:var(--muted);">noch ${fmt(short(g))} ${g.pTarget && r.total.p / g.pTarget <= r.total.q / g.qTarget ? 'P' : 'QP'}</div></th>`).join('');
+    const body = allVariants().map(v => {
+      const avg = variantAvg(v);
+      const cells = open.map(g => {
+        const n = Math.ceil(short(g) / avg);
+        return `<td><b>${n}</b><div style="font-size:11px; color:var(--muted);">≈ ${Math.ceil(n / 2)}× H+R${monthsLeft ? `<br>${(n / monthsLeft).toLocaleString("de-DE", { maximumFractionDigits: 1 })}/Mon.` : ""}</div></td>`;
+      }).join('');
+      return `<tr><td>${esc(v.name)}<div style="font-size:11px; color:var(--muted);">Ø ${avg.toLocaleString('de-DE', { maximumFractionDigits: 1 })} P/QP je Segment</div></td>${cells}</tr>`;
+    }).join('');
+    el.innerHTML = `<div style="overflow-x:auto;"><table class="sim-res-table sim-need-table"><thead><tr><th>Variante</th>${head}</tr></thead><tbody>${body}</tbody></table></div>
+      <p class="hint" style="margin:6px 0 0;">Segmente = noch zu fliegende Teilstrecken, H+R = Hin- und Rückflug. ${monthsLeft ? `„/Mon.“ rechnet mit den ${monthsLeft.toLocaleString('de-DE', { maximumFractionDigits: 1 })} Monaten bis Jahresende. ` : ''}Die Zahlen gelten für Lufthansa-Group-Flüge (Points = QP).</p>`;
+    renderCustomVariants();
+  }
+
+  function renderCustomVariants() {
+    const list = settings.simVariants || [];
+    $('sv-custom').innerHTML = list.map(v => `<div class="sim-row"><div><b>${esc(v.name)}</b><div class="meta" style="font-size:12px; color:var(--muted);">${v.range === 'continental' ? 'Kontinental' : 'Interkontinental'} · ${v.biz} % Business · CO₂ ${v.co2 > 0 ? '+' + v.co2 + ' %' : 'nein'}</div></div>
+      <div><button class="del" onclick="simRemoveVariant('${v.id}')">entfernen</button></div></div>`).join('');
+  }
+  $('sv-add').addEventListener('click', async () => {
+    const biz = Math.min(100, Math.max(0, parseInt($('sv-biz').value) || 0));
+    const range = $('sv-range').value, co2 = parseInt($('sv-co2').value) || 0;
+    const name = $('sv-name').value.trim() || `${biz} % Business${range === 'intercontinental' ? ' (interkont.)' : ''}${co2 ? ' mit CO₂' : ''}`;
+    settings.simVariants = [...(settings.simVariants || []), { id: genId(), name, range, biz, co2 }];
+    await saveSettings();
+    $('sv-name').value = '';
+    renderSim();
+  });
+  window.simRemoveVariant = async (id) => {
+    settings.simVariants = (settings.simVariants || []).filter(v => v.id !== id);
+    await saveSettings();
+    renderSim();
+  };
+
   function renderUptripList() {
     const rewardText = (u) => [u.rewardPoints ? `${u.rewardPoints} P` : '', u.rewardQP ? `${u.rewardQP} QP` : '', u.rewardMeilen ? `${fmt(u.rewardMeilen)} Meilen` : ''].filter(Boolean).join(' · ') || 'keine Prämie hinterlegt';
     const rows = uptripItems.map(u => {
       const key = esc(upKey(u)), rem = upRemaining(u), c = Math.min(upCounts[upKey(u)] || 0, rem);
-      const hasPQ = (u.rewardPoints || 0) + (u.rewardQP || 0) > 0;
+      const hasPQ = (u.rewardPoints || 0) + (u.rewardQP || 0) + (u.rewardMeilen || 0) > 0 || !!u.rewardOther;
       const needed = u.needed || 1, have = Math.min(u.have || 0, needed);
-      const status = rem === 0 ? 'Limit erreicht' : `${have}/${needed} Karten · noch ${rem} Einlösung${rem === 1 ? '' : 'en'} möglich${have < needed ? ' (Karten fehlen noch)' : ''}`;
+      const after = (u.have || 0) - needed * c;  // Kartenstand nach den simulierten Einlösungen (negativ = Karten fehlen)
+      const status = rem === 0 ? 'Limit erreicht' : `${have}/${needed} Karten · noch ${rem} Einlösung${rem === 1 ? '' : 'en'} möglich${have < needed ? ' (Karten fehlen noch)' : ''}`
+        + (c > 0 ? ` · danach ${after >= 0 ? after + ' Karten übrig' : -after + ' Karte(n) noch zu sammeln'}` : '');
       return `<div class="sim-row"><div><b>${esc(u.name)}</b><div class="meta" style="font-size:12px; color:var(--muted);">${esc(rewardText(u))} je Einlösung · ${status}</div></div>
         <div style="white-space:nowrap; text-align:right;">
           <button type="button" class="btn small secondary" data-k="${key}" onclick="simUptrip(this.dataset.k, -1)" ${c <= 0 ? 'disabled' : ''}>−</button>
@@ -119,12 +185,15 @@
   function renderResult() {
     const r = simulate();
     const rows = [['Points', r.base.p, r.total.p - r.base.p, r.total.p], ['QP', r.base.q, r.total.q - r.base.q, r.total.q]];
+    if (r.miles.up || r.miles.out) rows.push(['Meilen (Pool)', r.miles.base, r.miles.total - r.miles.base, r.miles.total]);
     let html = `<table class="sim-res-table"><thead><tr><th></th><th>Stand ${r.year}${$('sim-planned').checked ? ' (inkl. geplant)' : ''}</th><th>Szenario</th><th>Ergebnis</th></tr></thead><tbody>` +
       rows.map(([l, b, d, t]) => `<tr><td><b>${l}</b></td><td>${fmt(b)}</td><td>${d ? sgn(d) : '–'}</td><td><b>${fmt(t)}</b></td></tr>`).join('') + '</tbody></table>';
 
     const parts = [];
     if (r.fl.p || r.fl.q) parts.push(`Flüge: +${fmt(r.fl.p)} P / +${fmt(r.fl.q)} QP (${fmt(flights.reduce((s, f) => s + flightSegments(f), 0))} Segmente)`);
-    if (r.up.n) parts.push(`Uptrip: +${fmt(r.up.p)} P / +${fmt(r.up.q)} QP (${r.up.n} Einlösung${r.up.n === 1 ? '' : 'en'})`);
+    if (r.up.n) parts.push(`Uptrip: +${fmt(r.up.p)} P / +${fmt(r.up.q)} QP${r.up.m ? ' / +' + fmt(r.up.m) + ' Meilen' : ''} (${r.up.n} Einlösung${r.up.n === 1 ? '' : 'en'})`);
+    r.up.others.forEach(o => parts.push(`Uptrip-Prämie (nicht in Zahlen): ${esc(o)}`));
+    if (r.miles.out) parts.push(`Meilen-Abgang durch Tausch: −${fmt(r.miles.out)}`);
     if (r.cc) parts.push(`Kreditkarten-Tausch (${fmt(r.ccMiles)} Meilen): +${fmt(r.cc)} P / +${fmt(r.cc)} QP`);
     if (r.extra.p || r.extra.q) parts.push(`Zusätze: +${fmt(r.extra.p)} P / +${fmt(r.extra.q)} QP`);
     if (r.swapWanted) parts.push(r.swapUsed ? '800-QP-Tausch: in dieser Saison schon genutzt (steckt im Stand)' : r.swapOk ? '800-QP-Tausch: +125 P / +125 QP' : `800-QP-Tausch: im Szenario erst ${fmt(r.total.q)} QP — erst ab 800 QP möglich`);
@@ -175,6 +244,7 @@
     syncCcSlider();
     renderFlightList();
     renderUptripList();
+    renderNeed();
     renderResult();
     renderSavedScenarios();
   }

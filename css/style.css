@@ -456,3 +456,7 @@ nav.tabbar button.active { color: var(--navy); font-weight: 700; }
 .tf-summary::-webkit-details-marker { display: none; }
 .tf-summary::after { content: '▾'; margin-left: auto; color: var(--muted); }
 details[open] > .tf-summary::after { content: '▴'; }
+.sim-need-table th { vertical-align: bottom; font-size: 12px; }
+.sim-need-table td:first-child { max-width: 130px; font-size: 12px; }
+.sim-need-table td { font-size: 13px; }
+.sim-need-table tbody tr { border-top: 1px solid var(--gray-border); }

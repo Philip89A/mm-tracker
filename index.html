@@ -741,13 +741,6 @@
         <p class="hint" id="sim-add-msg" style="margin:6px 0 0;"></p>
         <div id="sim-flights" style="margin-top:8px;"></div>
 
-        <h3 class="sim-h">Hebel &amp; Zusätze</h3>
-        <label style="display:flex; align-items:center; gap:8px; margin-top:0; font-weight:600; color:var(--text);">
-          <input type="checkbox" id="sim-lever800" style="width:auto;"> 800-QP-Meilentausch (ab 800 QP: bis 20.000 Meilen → +125 P / +125 QP)
-        </label>
-        <label>Kreditkarten-Meilen-Tausch (5.000er-Schritte, 250 Meilen = 1 P + 1 QP)</label>
-        <input type="range" id="sim-cc" min="0" max="25000" step="5000" value="0">
-        <p class="hint" id="sim-cc-hint" style="margin:2px 0 0;"></p>
         <h3 class="sim-h">Uptrip-Kollektionen</h3>
         <p class="hint" style="margin:0 0 6px;">Deine Kollektionen aus dem Tab Sammeln: Wähle, wie oft du sie im Szenario einlöst. Das geht auch, wenn noch Karten fehlen.</p>
         <div id="sim-uptrip"></div>
@@ -765,6 +758,14 @@
           <div id="sim-up-custom"></div>
         </div>
 
+        <h3 class="sim-h">Hebel &amp; Zusätze</h3>
+        <label style="display:flex; align-items:center; gap:8px; margin-top:0; font-weight:600; color:var(--text);">
+          <input type="checkbox" id="sim-lever800" style="width:auto;"> 800-QP-Meilentausch (ab 800 QP: bis 20.000 Meilen → +125 P / +125 QP)
+        </label>
+        <label>Kreditkarten-Meilen-Tausch (5.000er-Schritte, 250 Meilen = 1 P + 1 QP)</label>
+        <input type="range" id="sim-cc" min="0" max="25000" step="5000" value="0">
+        <p class="hint" id="sim-cc-hint" style="margin:2px 0 0;"></p>
+
         <div class="row2">
           <div><label>Zusätzliche Points (z.B. Hotel, Partner)</label><input type="number" id="sim-extra-p" min="0" placeholder="0"></div>
           <div><label>Zusätzliche QP</label><input type="number" id="sim-extra-q" min="0" placeholder="0"></div>
@@ -774,6 +775,31 @@
       <div class="card" id="card-sim-result">
         <h2>📈 Ergebnis</h2>
         <div id="sim-result"></div>
+      </div>
+
+      <div class="card" id="card-sim-need">
+        <h2>🎯 Flugbedarf bis zum Ziel</h2>
+        <p class="hint" style="margin-top:0;">Wie viele <b>weitere Segmente</b> (ein Hin- oder Rückflug = 1 Segment) fehlen noch — ausgehend vom Ergebnis oben, also inkl. bereits absolvierter und geplanter Flüge, Uptrip-Einlösungen, Hebel und Zusätze. Jede Zeile ist eine Variante, wie du die restlichen Flüge fliegen könntest. Bei Zielen mit Points und QP zählt der größere Rückstand (bei Lufthansa-Group-Flügen ist das meist Points).</p>
+        <div id="sim-need"></div>
+        <details style="margin-top:10px;">
+          <summary style="cursor:pointer; font-weight:600; color:var(--navy);">➕ Eigene Variante anlegen</summary>
+          <div class="row2">
+            <div><label>Name</label><input type="text" id="sv-name" placeholder="z.B. 30 % Business" autocomplete="off"></div>
+            <div>
+              <label>Reichweite</label>
+              <select id="sv-range"><option value="continental">Kontinental (Europa)</option><option value="intercontinental">Interkontinental</option></select>
+            </div>
+          </div>
+          <div class="row2">
+            <div><label>Anteil Business (%)</label><input type="number" id="sv-biz" min="0" max="100" value="0"></div>
+            <div>
+              <label>CO₂-Kompensation?</label>
+              <select id="sv-co2"><option value="0">Nein</option><option value="30">~30 %</option><option value="80" selected>~80 %</option></select>
+            </div>
+          </div>
+          <button type="button" class="btn small secondary" id="sv-add" style="margin-top:8px;">Variante hinzufügen</button>
+          <div id="sv-custom"></div>
+        </details>
       </div>
 
       <div class="card" id="card-sim-actions">
