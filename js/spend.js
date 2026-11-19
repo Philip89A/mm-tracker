@@ -15,11 +15,20 @@
 
   const emptyCat = () => ({ cost: 0, p: 0, q: 0, n: 0, unN: 0, unP: 0, unQ: 0 });
 
+  // Beleg zu einer Ausgabe eines Trips: Nummer und/oder hochgeladene Datei der passenden Art
+  const KIND_FIELD = { flight: 'receiptNo', upgrade: 'upgradeReceiptNo', co2: 'co2ReceiptNo' };
+  const rc = (t, kind) => ({
+    no: t[KIND_FIELD[kind]] || '',
+    files: (t.receiptFiles || []).filter(f => f.kind === kind).length
+  });
+  const hasReceipt = (r) => !!(r.no || r.files);
+  const receiptText = (r) => [r.no, r.files ? `📎${r.files}` : ''].filter(Boolean).join(' ');
+
   function compute(year, includePlanned) {
     const cat = { flight: emptyCat(), upgrade: emptyCat(), co2: emptyCat(), other: emptyCat() };
     const free = { n: 0, p: 0, q: 0 };
     let flightsNoPrice = 0;
-    const perTrip = [];
+    const perTrip = [], other = [];
     const inYear = (d) => !year || (d || '').startsWith(year);
 
     trips.forEach(t => {
@@ -30,19 +39,19 @@
       const own = [];
       // Flug
       if (s.flight.paidByMe) {
-        if (s.flight.cost > 0) { const c = cat.flight; c.cost += s.flight.cost; c.p += s.flight.p; c.q += s.flight.q; c.n++; own.push(['Flug', s.flight.cost, s.flight.p, s.flight.q]); }
+        if (s.flight.cost > 0) { const c = cat.flight; c.cost += s.flight.cost; c.p += s.flight.p; c.q += s.flight.q; c.n++; own.push(['Flug', s.flight.cost, s.flight.p, s.flight.q, rc(t, 'flight')]); }
         else if (s.flight.p > 0) flightsNoPrice++;
       } else if (s.flight.p > 0) { free.n++; free.p += s.flight.p; free.q += s.flight.q; }
       // Upgrade
       if (s.upgrade.p > 0) {
         const c = cat.upgrade;
-        if (s.upgrade.cost > 0) { c.cost += s.upgrade.cost; c.p += s.upgrade.p; c.q += s.upgrade.q; c.n++; own.push(['Upgrade', s.upgrade.cost, s.upgrade.p, s.upgrade.q]); }
+        if (s.upgrade.cost > 0) { c.cost += s.upgrade.cost; c.p += s.upgrade.p; c.q += s.upgrade.q; c.n++; own.push(['Upgrade', s.upgrade.cost, s.upgrade.p, s.upgrade.q, rc(t, 'upgrade')]); }
         else { c.unN++; c.unP += s.upgrade.p; c.unQ += s.upgrade.q; }
       }
       // CO₂-Ausgleich
       if (s.co2.p > 0 || s.co2.cost > 0) {
         const c = cat.co2;
-        if (s.co2.cost > 0) { c.cost += s.co2.cost; c.p += s.co2.p; c.q += s.co2.q; c.n++; own.push(['CO₂-Ausgleich', s.co2.cost, s.co2.p, s.co2.q]); }
+        if (s.co2.cost > 0) { c.cost += s.co2.cost; c.p += s.co2.p; c.q += s.co2.q; c.n++; own.push(['CO₂-Ausgleich', s.co2.cost, s.co2.p, s.co2.q, rc(t, 'co2')]); }
         else { c.unN++; c.unP += s.co2.p; c.unQ += s.co2.q; }
       }
       if (own.length) perTrip.push({ t, own });
@@ -56,8 +65,10 @@
       const q = (v.qp || 0) + Math.round((v.qp || 0) * co2 / 100);
       const c = cat.other;
       c.cost += v.cost || 0; c.p += p; c.q += q; c.n++;
+      if (v.cost > 0) other.push(v);
     });
-    return { cat, free, flightsNoPrice, perTrip };
+    const missing = perTrip.reduce((s, x) => s + x.own.filter(o => !hasReceipt(o[4])).length, 0) + other.filter(v => !v.receiptNo).length;
+    return { cat, free, flightsNoPrice, perTrip, other, missing };
   }
 
   function renderSpend() {
@@ -98,6 +109,7 @@
     const notes = [];
     if (r.free.n) notes.push(`💼 ${r.free.n} ${r.free.n === 1 ? 'Flug' : 'Flüge'} vom Arbeitgeber/Dritten bezahlt: gratis +${fmt(r.free.p)} P / +${fmt(r.free.q)} QP.`);
     if (r.flightsNoPrice) notes.push(`${r.flightsNoPrice} ${r.flightsNoPrice === 1 ? 'Flug' : 'Flüge'} ohne Preis und ohne Vermerk „Arbeitgeber/Dritte“ — nicht gewertet. Preis eintragen oder „Wer zahlt den Flug?“ im Trip ändern.`);
+    notes.push(r.missing ? `🧾 ${r.missing} ${r.missing === 1 ? 'Ausgabe' : 'Ausgaben'} ohne Beleg (weder Nummer noch Datei).` : '🧾 Zu allen Ausgaben ist ein Beleg hinterlegt.');
     notes.push('Upgrade-Ertrag = Zusatz-QP gegenüber der gebuchten Klasse (inkl. CO₂-Bonus darauf), CO₂-Ertrag = Bonus-Points auf den ursprünglich gebuchten Flug. Einträge ohne Preis fließen nicht in €/Punkt ein.');
     html += `<div class="hint" style="margin:8px 0 0;">${notes.join('<br>')}</div>`;
 
@@ -108,13 +120,30 @@
         list.map(({ t, own }) => {
           const sum = own.reduce((s, o) => s + o[1], 0);
           return `<div class="sim-row"><div><b>${esc(t.route)}</b> <span class="meta" style="color:var(--muted);">${esc(t.date)}</span>
-            <div class="meta" style="font-size:12px; color:var(--muted);">${own.map(([n, c, p, q]) => `${n} ${eur(c)} → +${fmt(p)} P${q !== p ? ' / +' + fmt(q) + ' QP' : ''}`).join(' · ')}</div></div>
+            <div class="meta" style="font-size:12px; color:var(--muted);">${own.map(([n, c, p, q, rcpt]) => `${n} ${eur(c)} → +${fmt(p)} P${q !== p ? ' / +' + fmt(q) + ' QP' : ''} · ${hasReceipt(rcpt) ? '🧾 ' + esc(receiptText(rcpt)) : 'kein Beleg'}`).join('<br>')}</div></div>
             <div style="text-align:right; white-space:nowrap;"><b>${eur(sum)}</b></div></div>`;
         }).join('') + '</details>';
     }
+    html += '<button type="button" class="btn secondary" style="margin-top:12px;" onclick="exportSpendCsv()">⬇️ Ausgaben mit Belegen als CSV exportieren</button>';
     body.innerHTML = html;
   }
   window.renderSpend = renderSpend;
+
+  // CSV für Reisekostenabrechnung o. Ä.: eine Zeile je Ausgabe (Flug, Upgrade, CO₂, Wertrechner)
+  window.exportSpendCsv = function () {
+    const r = compute($('sp-year').value, !!$('sp-planned').value);
+    const header = ['Datum', 'Strecke/Kanal', 'Kategorie', 'Betrag €', 'Beleg-Nr.', 'Belegdateien', 'Points', 'QP', 'Notiz'];
+    const rows = [];
+    r.perTrip.forEach(({ t, own }) => own.forEach(([n, c, p, q, rcpt]) => rows.push([t.date, t.route, n, c, rcpt.no, rcpt.files || '', p, q, t.note || ''])));
+    r.other.forEach(v => {
+      const co2 = v.co2 || 0;
+      rows.push([v.date || '', v.type, 'Wertrechner', v.cost, v.receiptNo || '', '',
+        (v.points || 0) + Math.round((v.points || 0) * co2 / 100), (v.qp || 0) + Math.round((v.qp || 0) * co2 / 100), v.note || '']);
+    });
+    rows.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    const lines = [header, ...rows].map(row => row.map(csvEscape).join(';'));
+    downloadBlob(String.fromCharCode(0xFEFF) + lines.join('\r\n'), 'text/csv;charset=utf-8;', `ausgaben-${new Date().toISOString().slice(0, 10)}.csv`);
+  };
 
   $('sp-year').addEventListener('change', renderSpend);
   $('sp-planned').addEventListener('change', renderSpend);

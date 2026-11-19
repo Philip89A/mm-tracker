@@ -917,6 +917,7 @@ function renderTrips() {
           ${tripFlightInfos(t).map(f => `<div class="meta">✈️ ${escHtml(flightInfoText(f))}</div>`).join('')}
           ${tripUpgradeDeltaQP(t) > 0 ? `<div class="meta">⬆️ Upgrade von ${labelClass(t.upgradeFrom)}${t.upgradeCost > 0 ? ': ' + t.upgradeCost.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' € für +' + tripUpgradeDeltaQP(t) + ' QP (' + (t.upgradeCost / tripUpgradeDeltaQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP)' : ''}</div>` : ''}
           ${t.co2Cost > 0 ? `<div class="meta">🌱 CO₂-Ausgleich: ${t.co2Cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} €${tripSpend(t).co2.p > 0 ? ' für +' + tripSpend(t).co2.p + ' Points (' + (t.co2Cost / tripSpend(t).co2.p).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/Point)' : ''}</div>` : ''}
+          ${typeof receiptLinesHtml === 'function' ? receiptLinesHtml(t) : ''}
           ${t.note ? `<div class="meta">📝 ${escHtml(t.note)}</div>` : ''}
         </div>
         <div class="pts">
@@ -1332,6 +1333,7 @@ function renderCalc() {
       <div>
         <div class="route">${c.type} ${c.idx === bestIdx ? '🏆' : ''}</div>
         <div class="meta">${c.cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} € · ${c.totalPoints} P · ${c.totalQp} QP${c.co2 > 0 ? ' (inkl. CO₂ +' + c.co2 + '%)' : ''}</div>
+        ${c.receiptNo ? `<div class="meta">🧾 Beleg ${escHtml(c.receiptNo)}</div>` : ''}
         ${c.note ? `<div class="meta">📝 ${c.note}</div>` : ''}
       </div>
       <div class="pts">
@@ -1480,7 +1482,7 @@ function csvEscape(v) {
 }
 
 window.exportTripsCsv = function() {
-  const header = ['Datum', 'Strecke', 'Airline', 'Reichweite', 'Klasse', 'Segmente', 'CO2-Bonus %', 'Points', 'QP', 'Preis €', 'Flug bezahlt von', 'CO2-Ausgleich Kosten €', 'Sammelart', 'Upgrade von', 'Upgrade-Kosten €', 'Zusatz-QP durch Upgrade', 'Historisch', 'Geplant', 'Notiz'];
+  const header = ['Datum', 'Strecke', 'Airline', 'Reichweite', 'Klasse', 'Segmente', 'CO2-Bonus %', 'Points', 'QP', 'Preis €', 'Flug bezahlt von', 'CO2-Ausgleich Kosten €', 'Beleg Flug', 'Beleg Upgrade', 'Beleg CO2', 'Belegdateien', 'Sammelart', 'Upgrade von', 'Upgrade-Kosten €', 'Zusatz-QP durch Upgrade', 'Historisch', 'Geplant', 'Notiz'];
   const sorted = [...trips].sort((a, b) => new Date(a.date) - new Date(b.date));
   const rows = sorted.map(t => [
     t.date,
@@ -1495,6 +1497,10 @@ window.exportTripsCsv = function() {
     t.cost || '',
     t.paidBy === 'other' ? 'Arbeitgeber/Dritte' : 'Ich selbst',
     t.co2Cost || '',
+    t.receiptNo || '',
+    t.upgradeReceiptNo || '',
+    t.co2ReceiptNo || '',
+    (t.receiptFiles || []).length || '',
     t.qpMode === 'pointsOnly' ? 'Partner (nur Points)' : 'Lufthansa Group',
     t.upgradeFrom ? labelClass(t.upgradeFrom) : '',
     t.upgradeCost || '',
@@ -2284,6 +2290,12 @@ window.startEditTrip = function(idx) {
   document.getElementById('t-cost').value = t.cost || '';
   document.getElementById('t-paidby').value = t.paidBy === 'other' ? 'other' : 'self';
   document.getElementById('t-co2-cost').value = t.co2Cost || '';
+  document.getElementById('t-rc-flight').value = t.receiptNo || '';
+  document.getElementById('t-rc-upgrade').value = t.upgradeReceiptNo || '';
+  document.getElementById('t-rc-co2').value = t.co2ReceiptNo || '';
+  tripReceiptFiles = (t.receiptFiles || []).map(f => ({ ...f })); tripSessionUploads = []; tripFilesToDelete = [];
+  if (typeof renderReceiptFiles === 'function') renderReceiptFiles();
+  document.getElementById('t-receipts-details').open = !!(t.receiptNo || t.upgradeReceiptNo || t.co2ReceiptNo || tripReceiptFiles.length);
   const linkedMiles = milesLog.filter(mv => mv.sourceTripId === t.id);
   document.getElementById('t-miles').value = (linkedMiles.find(mv => mv.category === 'Flüge') || {}).amount || '';
   document.getElementById('t-exec-miles').value = (linkedMiles.find(mv => mv.category === 'Executive Meilen') || {}).amount || '';
@@ -2295,10 +2307,20 @@ window.startEditTrip = function(idx) {
   document.getElementById('t-date').scrollIntoView({ behavior: 'smooth', block: 'center' });
 };
 
+// Belege (Dateien) im Trip-Formular: Zustand für receipts.js. Hochgeladene, aber nicht
+// gespeicherte Dateien werden beim Abbrechen wieder gelöscht, entfernte erst beim Speichern.
+let tripReceiptFiles = [];     // aktuelle Dateiliste des Trips im Formular
+let tripSessionUploads = [];   // in dieser Bearbeitung neu hochgeladen
+let tripFilesToDelete = [];    // beim Speichern aus dem Speicher zu entfernen
+let pendingTripId = null;      // ID eines neuen Trips, damit Dateien schon vor dem Speichern richtig abgelegt werden
+
 window.cancelEditTrip = function() {
+  if (typeof discardReceiptUploads === 'function') discardReceiptUploads();
   editingTripId = null;
+  tripReceiptFiles = []; tripSessionUploads = []; tripFilesToDelete = []; pendingTripId = null;
   document.getElementById('trip-form').reset();
   document.getElementById('t-segments').value = 2;
+  if (typeof renderReceiptFiles === 'function') renderReceiptFiles();
   loadFlightRows([]);
   document.getElementById('trip-submit-btn').textContent = 'Trip speichern';
   document.getElementById('trip-cancel-btn').style.display = 'none';
@@ -2307,9 +2329,13 @@ window.cancelEditTrip = function() {
 document.getElementById('trip-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const isEdit = !!editingTripId;
-  const tripId = isEdit ? editingTripId : genId();
+  const tripId = isEdit ? editingTripId : (pendingTripId || genId());
   const trip = {
     id: tripId,
+    receiptNo: document.getElementById('t-rc-flight').value.trim(),
+    upgradeReceiptNo: document.getElementById('t-rc-upgrade').value.trim(),
+    co2ReceiptNo: document.getElementById('t-rc-co2').value.trim(),
+    receiptFiles: tripReceiptFiles.map(f => ({ ...f })),
     date: document.getElementById('t-date').value,
     route: document.getElementById('t-route').value,
     range: document.getElementById('t-range').value,
@@ -2365,6 +2391,9 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
   });
   if (milesChanged) await saveMilesLog();
 
+  // Gespeichert: neue Dateien bleiben, entfernte werden jetzt wirklich gelöscht.
+  if (typeof deleteReceiptFiles === 'function') await deleteReceiptFiles(tripFilesToDelete);
+  tripSessionUploads = [];
   cancelEditTrip();
   render();
 });
@@ -2404,7 +2433,8 @@ document.getElementById('calc-form').addEventListener('submit', async (e) => {
     qp: parseInt(document.getElementById('c-qp').value) || 0,
     co2: parseInt(document.getElementById('c-co2').value) || 0,
     note: document.getElementById('c-note').value,
-    date: document.getElementById('c-date').value || new Date().toISOString().slice(0, 10)
+    date: document.getElementById('c-date').value || new Date().toISOString().slice(0, 10),
+    receiptNo: document.getElementById('c-receipt').value.trim()
   });
   await saveValueLog();
   e.target.reset();

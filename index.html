@@ -519,6 +519,30 @@
         <label>CO₂-Ausgleich: Kosten (€, von dir bezahlt)</label>
         <input type="number" id="t-co2-cost" min="0" step="0.01" placeholder="0,00">
         <p class="hint" style="margin:4px 0 0;">Wenn der Arbeitgeber den Flug zahlt, trägst du hier nur ein, was du selbst für die CO₂-Kompensation und beim Upgrade bezahlst. Auswertung: Rechner → Ausgaben.</p>
+        <details id="t-receipts-details" style="margin-top:12px;">
+          <summary style="cursor:pointer; font-weight:600; color:var(--navy);">🧾 Belege (Nummer und Datei)</summary>
+          <p class="hint" style="margin:6px 0;">Trag mindestens die Belegnummer ein; Dateien (PDF oder Foto, bis 10 MB) sind optional und liegen privat in deinem Konto. Dateien lassen sich nur hochladen, wenn du angemeldet bist, und sind nicht im JSON-Backup enthalten.</p>
+          <div class="row2">
+            <div><label style="margin-top:0;">Belegnr. Flug</label><input type="text" id="t-rc-flight" autocomplete="off"></div>
+            <div><label style="margin-top:0;">Belegnr. Upgrade</label><input type="text" id="t-rc-upgrade" autocomplete="off"></div>
+          </div>
+          <label>Belegnr. CO₂-Ausgleich</label>
+          <input type="text" id="t-rc-co2" autocomplete="off">
+          <label>Datei hochladen</label>
+          <div class="row2">
+            <div>
+              <select id="t-rc-kind">
+                <option value="flight">Flug</option>
+                <option value="upgrade">Upgrade</option>
+                <option value="co2">CO₂-Ausgleich</option>
+                <option value="other">Sonstiges</option>
+              </select>
+            </div>
+            <div><input type="file" id="t-rc-file" accept="application/pdf,image/*" multiple></div>
+          </div>
+          <p class="hint" id="t-rc-msg" style="margin:6px 0 0;"></p>
+          <div id="t-rc-list"></div>
+        </details>
         <label>Notiz (optional)</label>
         <input type="text" id="t-note" placeholder="z.B. über MUC geroutet">
         <p class="hint" style="margin:12px 0 0;">Optional: Meilen für diesen Flug — werden automatisch als Meilen-Bewegungen angelegt (kein doppeltes Eintragen im Meilen-Tab nötig).</p>
@@ -872,8 +896,10 @@
           <option value="30">Ja, ~30% Bonus</option>
           <option value="80">Ja, ~80% Bonus (Maximalpaket)</option>
         </select>
-        <label>Datum</label>
-        <input type="date" id="c-date">
+        <div class="row2">
+          <div><label>Datum</label><input type="date" id="c-date"></div>
+          <div><label>Belegnummer</label><input type="text" id="c-receipt" autocomplete="off"></div>
+        </div>
         <label>Notiz</label>
         <input type="text" id="c-note" placeholder="z.B. Kartentausch Mai">
         <button type="submit" class="btn secondary">Berechnen & speichern</button>
@@ -1065,6 +1091,7 @@
 <script src="js/app.js"></script>
 <script src="js/map.js"></script>
 <script src="js/extras.js"></script>
+<script src="js/receipts.js"></script>
 <script src="js/sim.js"></script>
 <script src="js/spend.js"></script>
 <script src="js/auth.js"></script>
