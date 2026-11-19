@@ -15,12 +15,17 @@
 
   const emptyCat = () => ({ cost: 0, p: 0, q: 0, n: 0, unN: 0, unP: 0, unQ: 0 });
 
-  // Beleg zu einer Ausgabe eines Trips: Nummer und/oder hochgeladene Datei der passenden Art
-  const KIND_FIELD = { flight: 'receiptNo', upgrade: 'upgradeReceiptNo', co2: 'co2ReceiptNo' };
-  const rc = (t, kind) => ({
-    no: t[KIND_FIELD[kind]] || '',
-    files: (t.receiptFiles || []).filter(f => f.kind === kind).length
-  });
+  // Belege zu einer Ausgabe: Nummer(n) und/oder hochgeladene Dateien der passenden Art. Bei zusammen
+  // gebuchten Trips (gleiche bookingId) gelten die Belege der ganzen Buchung.
+  const KIND_FIELDS = { flight: ['receiptNo'], upgrade: ['upgradeReceiptNo'], co2: ['co2ReceiptNo', 'co2ReceiptNo2'] };
+  const bookingMates = (t) => (t.bookingId ? trips.filter(x => x.bookingId === t.bookingId) : [t]);
+  const rc = (t, kind) => {
+    const mates = bookingMates(t);
+    return {
+      no: [...new Set(mates.flatMap(m => KIND_FIELDS[kind].map(f => m[f]).filter(Boolean)))].join(' / '),
+      files: mates.reduce((s, m) => s + (m.receiptFiles || []).filter(f => f.kind === kind).length, 0)
+    };
+  };
   const hasReceipt = (r) => !!(r.no || r.files);
   const receiptText = (r) => [r.no, r.files ? `📎${r.files}` : ''].filter(Boolean).join(' ');
 
@@ -31,28 +36,42 @@
     const perTrip = [], other = [];
     const inYear = (d) => !year || (d || '').startsWith(year);
 
+    // Kosten je Buchung: bei zusammen gebuchten Trips genügt es, den Preis bei einem Trip einzutragen
+    const groupCost = {};
+    trips.forEach(t => {
+      if (!t.bookingId) return;
+      const g = (groupCost[t.bookingId] = groupCost[t.bookingId] || { flight: 0, upgrade: 0, co2: 0 });
+      if (t.paidBy !== 'other') g.flight += t.cost || 0;
+      g.upgrade += t.upgradeCost || 0;
+      g.co2 += t.co2Cost || 0;
+    });
+    const priced = (t, kind, own) => own > 0 || !!(t.bookingId && groupCost[t.bookingId] && groupCost[t.bookingId][kind] > 0);
+
     trips.forEach(t => {
       if (!t.date || !inYear(t.date)) return;
       if (t.planned && !includePlanned) return;
       if (t.noPoints && !(t.cost > 0 || t.upgradeCost > 0 || t.co2Cost > 0)) return;
       const s = tripSpend(t);
       const own = [];
+      const add = (label, kind, x) => {
+        const c = cat[kind];
+        c.cost += x.cost; c.p += x.p; c.q += x.q; c.n++;
+        own.push([label, x.cost, x.p, x.q, rc(t, kind), !!t.bookingId]);
+      };
       // Flug
       if (s.flight.paidByMe) {
-        if (s.flight.cost > 0) { const c = cat.flight; c.cost += s.flight.cost; c.p += s.flight.p; c.q += s.flight.q; c.n++; own.push(['Flug', s.flight.cost, s.flight.p, s.flight.q, rc(t, 'flight')]); }
+        if (priced(t, 'flight', s.flight.cost)) add('Flug', 'flight', s.flight);
         else if (s.flight.p > 0) flightsNoPrice++;
       } else if (s.flight.p > 0) { free.n++; free.p += s.flight.p; free.q += s.flight.q; }
       // Upgrade
       if (s.upgrade.p > 0) {
-        const c = cat.upgrade;
-        if (s.upgrade.cost > 0) { c.cost += s.upgrade.cost; c.p += s.upgrade.p; c.q += s.upgrade.q; c.n++; own.push(['Upgrade', s.upgrade.cost, s.upgrade.p, s.upgrade.q, rc(t, 'upgrade')]); }
-        else { c.unN++; c.unP += s.upgrade.p; c.unQ += s.upgrade.q; }
+        if (priced(t, 'upgrade', s.upgrade.cost)) add('Upgrade', 'upgrade', s.upgrade);
+        else { const c = cat.upgrade; c.unN++; c.unP += s.upgrade.p; c.unQ += s.upgrade.q; }
       }
       // CO₂-Ausgleich
       if (s.co2.p > 0 || s.co2.cost > 0) {
-        const c = cat.co2;
-        if (s.co2.cost > 0) { c.cost += s.co2.cost; c.p += s.co2.p; c.q += s.co2.q; c.n++; own.push(['CO₂-Ausgleich', s.co2.cost, s.co2.p, s.co2.q, rc(t, 'co2')]); }
-        else { c.unN++; c.unP += s.co2.p; c.unQ += s.co2.q; }
+        if (priced(t, 'co2', s.co2.cost)) add('CO₂-Ausgleich', 'co2', s.co2);
+        else { const c = cat.co2; c.unN++; c.unP += s.co2.p; c.unQ += s.co2.q; }
       }
       if (own.length) perTrip.push({ t, own });
     });
@@ -67,7 +86,7 @@
       c.cost += v.cost || 0; c.p += p; c.q += q; c.n++;
       if (v.cost > 0) other.push(v);
     });
-    const missing = perTrip.reduce((s, x) => s + x.own.filter(o => !hasReceipt(o[4])).length, 0) + other.filter(v => !v.receiptNo).length;
+    const missing = perTrip.reduce((s, x) => s + x.own.filter(o => o[1] > 0 && !hasReceipt(o[4])).length, 0) + other.filter(v => !v.receiptNo).length;
     return { cat, free, flightsNoPrice, perTrip, other, missing };
   }
 
@@ -120,7 +139,7 @@
         list.map(({ t, own }) => {
           const sum = own.reduce((s, o) => s + o[1], 0);
           return `<div class="sim-row"><div><b>${esc(t.route)}</b> <span class="meta" style="color:var(--muted);">${esc(t.date)}</span>
-            <div class="meta" style="font-size:12px; color:var(--muted);">${own.map(([n, c, p, q, rcpt]) => `${n} ${eur(c)} → +${fmt(p)} P${q !== p ? ' / +' + fmt(q) + ' QP' : ''} · ${hasReceipt(rcpt) ? '🧾 ' + esc(receiptText(rcpt)) : 'kein Beleg'}`).join('<br>')}</div></div>
+            <div class="meta" style="font-size:12px; color:var(--muted);">${own.map(([n, c, p, q, rcpt, shared]) => `${n} ${c > 0 || !shared ? eur(c) : 'in gemeinsamer Buchung'} → +${fmt(p)} P${q !== p ? ' / +' + fmt(q) + ' QP' : ''} · ${hasReceipt(rcpt) ? '🧾 ' + esc(receiptText(rcpt)) : 'kein Beleg'}`).join('<br>')}</div></div>
             <div style="text-align:right; white-space:nowrap;"><b>${eur(sum)}</b></div></div>`;
         }).join('') + '</details>';
     }

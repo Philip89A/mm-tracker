@@ -94,7 +94,8 @@
     const parts = [];
     if (t.receiptNo) parts.push(`Flug ${esc(t.receiptNo)}`);
     if (t.upgradeReceiptNo) parts.push(`Upgrade ${esc(t.upgradeReceiptNo)}`);
-    if (t.co2ReceiptNo) parts.push(`CO₂ ${esc(t.co2ReceiptNo)}`);
+    if (t.co2ReceiptNo) parts.push(`CO₂ Fuel ${esc(t.co2ReceiptNo)}`);
+    if (t.co2ReceiptNo2) parts.push(`CO₂ Projects ${esc(t.co2ReceiptNo2)}`);
     const files = (t.receiptFiles || []).map(f => `<a href="#" onclick="openReceipt('${esc(f.path)}'); return false;">📎 ${esc(f.name)}</a>`);
     if (!parts.length && !files.length) return '';
     return `<div class="meta">🧾 ${parts.join(' · ') || 'Belege'}${files.length ? ' · ' + files.join(' · ') : ''}</div>`;

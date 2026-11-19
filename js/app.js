@@ -831,6 +831,7 @@ function renderTrips() {
   const list = document.getElementById('trip-list');
   document.getElementById('trip-count').textContent = trips.length;
   populateTripFilters();
+  populateBookingSelect(editingTripId);
   const activeF = ['tf-year', 'tf-status', 'tf-airline', 'tf-airport', 'tf-country', 'tf-class', 'tf-aircraft', 'tf-reg', 'tf-seatkind', 'tf-search'].filter(id => document.getElementById(id).value).length;
   const badge = document.getElementById('tf-active');
   badge.textContent = activeF;
@@ -917,6 +918,7 @@ function renderTrips() {
           ${tripFlightInfos(t).map(f => `<div class="meta">✈️ ${escHtml(flightInfoText(f))}</div>`).join('')}
           ${tripUpgradeDeltaQP(t) > 0 ? `<div class="meta">⬆️ Upgrade von ${labelClass(t.upgradeFrom)}${t.upgradeCost > 0 ? ': ' + t.upgradeCost.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' € für +' + tripUpgradeDeltaQP(t) + ' QP (' + (t.upgradeCost / tripUpgradeDeltaQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP)' : ''}</div>` : ''}
           ${t.co2Cost > 0 ? `<div class="meta">🌱 CO₂-Ausgleich: ${t.co2Cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} €${tripSpend(t).co2.p > 0 ? ' für +' + tripSpend(t).co2.p + ' Points (' + (t.co2Cost / tripSpend(t).co2.p).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/Point)' : ''}</div>` : ''}
+          ${t.bookingId ? `<div class="meta">🔗 zusammen gebucht mit ${escHtml(trips.filter(x => x.id !== t.id && x.bookingId === t.bookingId).map(x => (x.date || '') + ' ' + x.route).join(', '))}</div>` : ''}
           ${typeof receiptLinesHtml === 'function' ? receiptLinesHtml(t) : ''}
           ${t.note ? `<div class="meta">📝 ${escHtml(t.note)}</div>` : ''}
         </div>
@@ -1499,7 +1501,7 @@ window.exportTripsCsv = function() {
     t.co2Cost || '',
     t.receiptNo || '',
     t.upgradeReceiptNo || '',
-    t.co2ReceiptNo || '',
+    [t.co2ReceiptNo, t.co2ReceiptNo2].filter(Boolean).join(' / '),
     (t.receiptFiles || []).length || '',
     t.qpMode === 'pointsOnly' ? 'Partner (nur Points)' : 'Lufthansa Group',
     t.upgradeFrom ? labelClass(t.upgradeFrom) : '',
@@ -2293,6 +2295,10 @@ window.startEditTrip = function(idx) {
   document.getElementById('t-rc-flight').value = t.receiptNo || '';
   document.getElementById('t-rc-upgrade').value = t.upgradeReceiptNo || '';
   document.getElementById('t-rc-co2').value = t.co2ReceiptNo || '';
+  document.getElementById('t-rc-co2b').value = t.co2ReceiptNo2 || '';
+  populateBookingSelect(t.id);
+  const partner = t.bookingId ? trips.find(x => x.id !== t.id && x.bookingId === t.bookingId) : null;
+  document.getElementById('t-booking-with').value = partner ? partner.id : '';
   tripReceiptFiles = (t.receiptFiles || []).map(f => ({ ...f })); tripSessionUploads = []; tripFilesToDelete = [];
   if (typeof renderReceiptFiles === 'function') renderReceiptFiles();
   document.getElementById('t-receipts-details').open = !!(t.receiptNo || t.upgradeReceiptNo || t.co2ReceiptNo || tripReceiptFiles.length);
@@ -2306,6 +2312,24 @@ window.startEditTrip = function(idx) {
   setTripsPage('add');
   document.getElementById('t-date').scrollIntoView({ behavior: 'smooth', block: 'center' });
 };
+
+// Buchungen (mehrere Trips zusammen bezahlt): bookingId mit nur einem Trip ist bedeutungslos und wird entfernt.
+function pruneBookings() {
+  const count = {};
+  trips.forEach(t => { if (t.bookingId) count[t.bookingId] = (count[t.bookingId] || 0) + 1; });
+  trips.forEach(t => { if (t.bookingId && count[t.bookingId] < 2) delete t.bookingId; });
+}
+
+// Auswahl „Zusammen gebucht mit“: alle anderen Trips, neueste zuerst. Die aktuelle Auswahl bleibt erhalten.
+function populateBookingSelect(currentId) {
+  const sel = document.getElementById('t-booking-with');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">nicht verknüpft</option>' + [...trips].filter(t => t.id !== currentId)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+    .map(t => `<option value="${escHtml(t.id)}">${escHtml(t.date || '')} · ${escHtml(t.route || '')}</option>`).join('');
+  if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+}
 
 // Belege (Dateien) im Trip-Formular: Zustand für receipts.js. Hochgeladene, aber nicht
 // gespeicherte Dateien werden beim Abbrechen wieder gelöscht, entfernte erst beim Speichern.
@@ -2335,6 +2359,7 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     receiptNo: document.getElementById('t-rc-flight').value.trim(),
     upgradeReceiptNo: document.getElementById('t-rc-upgrade').value.trim(),
     co2ReceiptNo: document.getElementById('t-rc-co2').value.trim(),
+    co2ReceiptNo2: document.getElementById('t-rc-co2b').value.trim(),
     receiptFiles: tripReceiptFiles.map(f => ({ ...f })),
     date: document.getElementById('t-date').value,
     route: document.getElementById('t-route').value,
@@ -2356,12 +2381,21 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     paidBy: document.getElementById('t-paidby').value === 'other' ? 'other' : 'self',
     co2Cost: parseFloat(document.getElementById('t-co2-cost').value) || 0
   };
+  // Zusammen gebuchte Trips teilen sich eine bookingId (Preise und Belege gelten für die ganze Buchung).
+  const withId = document.getElementById('t-booking-with').value;
+  const prevTrip = trips.find(t => t.id === tripId);
+  trip.bookingId = (prevTrip && prevTrip.bookingId) || '';
+  if (withId) {
+    const other = trips.find(t => t.id === withId);
+    if (other) { trip.bookingId = other.bookingId || trip.bookingId || genId(); other.bookingId = trip.bookingId; }
+  } else trip.bookingId = '';
   if (isEdit) {
     const idx = trips.findIndex(t => t.id === tripId);
     if (idx >= 0) trips[idx] = trip; else trips.push(trip);
   } else {
     trips.push(trip);
   }
+  pruneBookings();
   await saveTrips();
 
   // Meilen für diesen Flug direkt mit anlegen, statt sie separat im
