@@ -460,3 +460,8 @@ details[open] > .tf-summary::after { content: '▴'; }
 .sim-need-table td:first-child { max-width: 130px; font-size: 12px; }
 .sim-need-table td { font-size: 13px; }
 .sim-need-table tbody tr { border-top: 1px solid var(--gray-border); }
+.sp-table th, .sp-table td { font-size: 12px; padding: 5px 3px; }
+.sp-table td:nth-child(n+2), .sp-table th:nth-child(n+2) { white-space: nowrap; }
+.sp-table td:first-child { white-space: normal; min-width: 0; }
+.sp-note { font-size: 11px; color: var(--muted); font-weight: 400; }
+.sp-total td { border-top: 2px solid var(--gray-border); }

@@ -487,8 +487,19 @@
             <button type="button" class="btn secondary small" id="t-flights-fill">Aus Strecke vorbelegen</button>
           </div>
         </details>
-        <label>Preis gesamt (€, optional)</label>
-        <input type="number" id="t-cost" min="0" step="0.01" placeholder="0,00">
+        <div class="row2">
+          <div>
+            <label>Flugpreis (€, optional)</label>
+            <input type="number" id="t-cost" min="0" step="0.01" placeholder="0,00">
+          </div>
+          <div>
+            <label>Wer zahlt den Flug?</label>
+            <select id="t-paidby">
+              <option value="self">Ich selbst</option>
+              <option value="other">Arbeitgeber / Dritte</option>
+            </select>
+          </div>
+        </div>
         <div class="row2">
           <div>
             <label>Upgrade von (optional)</label>
@@ -505,6 +516,9 @@
           </div>
         </div>
         <p class="hint" style="margin:4px 0 0;">Oben die Klasse <b>nach</b> dem Upgrade eintragen — die Punkte zählen nur einmal. Aus dem Aufpreis rechnet die App den Zusatz-QP und €/QP selbst aus.</p>
+        <label>CO₂-Ausgleich: Kosten (€, von dir bezahlt)</label>
+        <input type="number" id="t-co2-cost" min="0" step="0.01" placeholder="0,00">
+        <p class="hint" style="margin:4px 0 0;">Wenn der Arbeitgeber den Flug zahlt, trägst du hier nur ein, was du selbst für die CO₂-Kompensation und beim Upgrade bezahlst. Auswertung: Rechner → Ausgaben.</p>
         <label>Notiz (optional)</label>
         <input type="text" id="t-note" placeholder="z.B. über MUC geroutet">
         <p class="hint" style="margin:12px 0 0;">Optional: Meilen für diesen Flug — werden automatisch als Meilen-Bewegungen angelegt (kein doppeltes Eintragen im Meilen-Tab nötig).</p>
@@ -598,7 +612,7 @@
     <div class="subnav" id="rechner-subnav">
       <button type="button" data-rp="plan" class="active">🧭 Planer</button>
       <button type="button" data-rp="sim">🧪 Simulation</button>
-      <button type="button" data-rp="value">💰 Wertrechner</button>
+      <button type="button" data-rp="value">💸 Ausgaben</button>
     </div>
 
     <div class="rp rp-plan">
@@ -817,9 +831,25 @@
     </div>
 
     <div class="rp rp-value">
+    <div class="card" id="card-spend">
+      <h2>💸 Meine Ausgaben &amp; was sie gebracht haben</h2>
+      <p class="hint" style="margin-top:0;">Zeigt, was du selbst bezahlt hast und welche Points/QP dafür herauskamen — getrennt nach Flug (wenn du ihn selbst zahlst), Upgrade und CO₂-Ausgleich aus deinen Trips plus den Einträgen im Wertrechner darunter. Flüge, die der Arbeitgeber zahlt, zählen nicht als Ausgabe; ihr Ertrag steht als „gratis“ separat.</p>
+      <div class="row2">
+        <div>
+          <label style="margin-top:0;">Zeitraum</label>
+          <select id="sp-year"><option value="">Alle Jahre</option></select>
+        </div>
+        <div>
+          <label style="margin-top:0;">Geplante Trips</label>
+          <select id="sp-planned"><option value="">nicht einrechnen</option><option value="1">einrechnen</option></select>
+        </div>
+      </div>
+      <div id="sp-body" style="margin-top:10px;"></div>
+    </div>
+
     <div class="card">
       <h2>💰 Wertrechner: €/Point & €/QP</h2>
-      <p class="hint" style="margin-top:0;">Trag eine Ausgabe ein — berechnet Kosten pro Point und pro Qualifying Point, sortiert nach bestem Wert.</p>
+      <p class="hint" style="margin-top:0;">Trag eine Ausgabe ein — berechnet Kosten pro Point und pro Qualifying Point, sortiert nach bestem Wert. Der Eintrag fließt in die Auswertung oben ein.</p>
       <form id="calc-form">
         <div class="row2">
           <div>
@@ -842,6 +872,8 @@
           <option value="30">Ja, ~30% Bonus</option>
           <option value="80">Ja, ~80% Bonus (Maximalpaket)</option>
         </select>
+        <label>Datum</label>
+        <input type="date" id="c-date">
         <label>Notiz</label>
         <input type="text" id="c-note" placeholder="z.B. Kartentausch Mai">
         <button type="submit" class="btn secondary">Berechnen & speichern</button>
@@ -1034,6 +1066,7 @@
 <script src="js/map.js"></script>
 <script src="js/extras.js"></script>
 <script src="js/sim.js"></script>
+<script src="js/spend.js"></script>
 <script src="js/auth.js"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mm-tracker-v63';
+const CACHE_NAME = 'mm-tracker-v67';
 const APP_SHELL = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ const APP_SHELL = [
   './js/map.js',
   './js/extras.js',
   './js/sim.js',
+  './js/spend.js',
   './js/auth.js',
   './icons/icon-192.png',
   './icons/icon-512.png',

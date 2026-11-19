@@ -237,6 +237,31 @@ function tripUpgradeDeltaQP(t) {
   return Math.max(0, delta) * (t.segments || 1);
 }
 
+// Eigene Ausgaben eines Trips und was sie gebracht haben, getrennt nach Flug, Upgrade und
+// CO₂-Kompensation. Das Upgrade zählt wie in tripUpgradeDeltaQP (inkl. CO₂-Bonus auf die
+// Differenz), der CO₂-Anteil ist der Bonus auf den ursprünglich gebuchten Teil. Die Summe
+// ergibt tripPoints(). Bei einem manuellen Points-Wert (pointsOverride) lässt sich nichts
+// aufteilen: alles gilt dann als Ertrag des Flugs.
+function tripSpend(t) {
+  const q = (p) => (t.qpMode === 'pointsOnly' ? 0 : p);
+  const flightPaidByMe = t.paidBy !== 'other';
+  const total = tripPoints(t);
+  let fp = total, up = 0, co2p = 0;
+  if (!t.noPoints && !(t.pointsOverride > 0)) {
+    const seg = t.segments || 1;
+    const origCls = t.upgradeFrom && t.upgradeFrom !== t.cls ? t.upgradeFrom : t.cls;
+    const base0 = pointsForSegment(t.range, origCls) * seg;
+    up = tripUpgradeDeltaQP(t);
+    co2p = Math.max(0, total - base0 - up);
+    fp = total - up - co2p;
+  } else if (t.noPoints) { fp = 0; }
+  return {
+    flight: { cost: flightPaidByMe ? (t.cost || 0) : 0, paidByMe: flightPaidByMe, p: fp, q: q(fp) },
+    upgrade: { cost: t.upgradeCost || 0, p: up, q: q(up) },
+    co2: { cost: t.co2Cost || 0, p: co2p, q: q(co2p) }
+  };
+}
+
 function segmentPointsWithCo2(range, cls, co2) {
   const base = pointsForSegment(range, cls);
   const bonus = Math.round(base * ((co2 || 0) / 100));
@@ -481,6 +506,7 @@ function render() {
     (typeof renderReconcile === 'function' ? renderReconcile : function renderReconcile() {}),
     (typeof renderVouchers === 'function' ? renderVouchers : function renderVouchers() {}),
     (typeof renderSim === 'function' ? renderSim : function renderSim() {}),
+    (typeof renderSpend === 'function' ? renderSpend : function renderSpend() {}),
     (typeof renderYearPlan === 'function' ? renderYearPlan : function renderYearPlan() {}),
     (typeof renderStats === 'function' ? renderStats : function renderStats() {}),
     (typeof renderBackupStatus === 'function' ? renderBackupStatus : function renderBackupStatus() {}),
@@ -830,7 +856,7 @@ function renderTrips() {
   }
 
   const filterYear = document.getElementById('tf-year').value;
-  const paid = filtered.filter(t => t.cost > 0 && !t.planned);
+  const paid = filtered.filter(t => t.cost > 0 && !t.planned && t.paidBy !== 'other');
   if (paid.length > 0) {
     const cost = paid.reduce((s, t) => s + t.cost, 0), qp = paid.reduce((s, t) => s + tripQP(t), 0), costQp = paid.filter(t => tripQP(t) > 0).reduce((s, t) => s + t.cost, 0);
     costEl.textContent = `💶 Ausgaben${filterYear ? ' ' + filterYear : ''}: ${cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} € für ${paid.length} bezahlte ${paid.length === 1 ? 'Flug' : 'Flüge'}${qp > 0 ? ` (Ø ${(costQp / qp).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})} €/QP, nur Flüge mit QP)` : ''} — nur Trips mit eingetragenem Preis, ohne geplante.`;
@@ -883,12 +909,14 @@ function renderTrips() {
         <div>
           <div class="route">${escHtml(t.route)}</div>
           <div class="meta">${t.date} · ${t.range === 'continental' ? 'Kontinental' : 'Interkont.'} · ${labelClass(t.cls)} · ${t.segments} Segm.${t.co2 > 0 ? ' · CO₂ +' + t.co2 + '%' : ''}${t.airline ? ' · ' + escHtml(t.airline) : ''}${t.qpMode === 'pointsOnly' ? ' · Partner' : ''}</div>
-          ${t.cost > 0 ? `<div class="meta">💶 ${t.cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} €${tripQP(t) > 0 ? ' · ' + (t.cost / tripQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP' : (tripPoints(t) > 0 ? ' · ' + (t.cost / tripPoints(t)).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/Point (keine QP)' : '')}</div>` : ''}
+          ${t.paidBy === 'other' ? `<div class="meta">💼 Flug zahlt Arbeitgeber/Dritte${t.cost > 0 ? ' (' + t.cost.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €, nicht in deinen Ausgaben)' : ''}</div>` : ''}
+          ${t.cost > 0 && t.paidBy !== 'other' ? `<div class="meta">💶 ${t.cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} €${tripQP(t) > 0 ? ' · ' + (t.cost / tripQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP' : (tripPoints(t) > 0 ? ' · ' + (t.cost / tripPoints(t)).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/Point (keine QP)' : '')}</div>` : ''}
           ${t.historical ? `<div class="meta"><span class="tag mid">🕰️ Historisch — nicht in Gesamtsumme</span></div>` : ''}
           ${t.planned ? `<div class="meta"><span class="tag ok">📅 Geplant</span></div>` : ''}
           ${t.noPoints ? `<div class="meta"><span class="tag mid">ℹ️ nur Flugdaten — keine Punkte berechnet</span></div>` : ''}
           ${tripFlightInfos(t).map(f => `<div class="meta">✈️ ${escHtml(flightInfoText(f))}</div>`).join('')}
           ${tripUpgradeDeltaQP(t) > 0 ? `<div class="meta">⬆️ Upgrade von ${labelClass(t.upgradeFrom)}${t.upgradeCost > 0 ? ': ' + t.upgradeCost.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' € für +' + tripUpgradeDeltaQP(t) + ' QP (' + (t.upgradeCost / tripUpgradeDeltaQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP)' : ''}</div>` : ''}
+          ${t.co2Cost > 0 ? `<div class="meta">🌱 CO₂-Ausgleich: ${t.co2Cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} €${tripSpend(t).co2.p > 0 ? ' für +' + tripSpend(t).co2.p + ' Points (' + (t.co2Cost / tripSpend(t).co2.p).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/Point)' : ''}</div>` : ''}
           ${t.note ? `<div class="meta">📝 ${escHtml(t.note)}</div>` : ''}
         </div>
         <div class="pts">
@@ -1452,7 +1480,7 @@ function csvEscape(v) {
 }
 
 window.exportTripsCsv = function() {
-  const header = ['Datum', 'Strecke', 'Airline', 'Reichweite', 'Klasse', 'Segmente', 'CO2-Bonus %', 'Points', 'QP', 'Preis €', 'Sammelart', 'Upgrade von', 'Upgrade-Kosten €', 'Zusatz-QP durch Upgrade', 'Historisch', 'Geplant', 'Notiz'];
+  const header = ['Datum', 'Strecke', 'Airline', 'Reichweite', 'Klasse', 'Segmente', 'CO2-Bonus %', 'Points', 'QP', 'Preis €', 'Flug bezahlt von', 'CO2-Ausgleich Kosten €', 'Sammelart', 'Upgrade von', 'Upgrade-Kosten €', 'Zusatz-QP durch Upgrade', 'Historisch', 'Geplant', 'Notiz'];
   const sorted = [...trips].sort((a, b) => new Date(a.date) - new Date(b.date));
   const rows = sorted.map(t => [
     t.date,
@@ -1465,6 +1493,8 @@ window.exportTripsCsv = function() {
     tripPoints(t),
     tripQP(t),
     t.cost || '',
+    t.paidBy === 'other' ? 'Arbeitgeber/Dritte' : 'Ich selbst',
+    t.co2Cost || '',
     t.qpMode === 'pointsOnly' ? 'Partner (nur Points)' : 'Lufthansa Group',
     t.upgradeFrom ? labelClass(t.upgradeFrom) : '',
     t.upgradeCost || '',
@@ -2252,6 +2282,8 @@ window.startEditTrip = function(idx) {
   loadFlightRows(tripFlightInfos(t));
   document.getElementById('t-points-override').value = t.pointsOverride || '';
   document.getElementById('t-cost').value = t.cost || '';
+  document.getElementById('t-paidby').value = t.paidBy === 'other' ? 'other' : 'self';
+  document.getElementById('t-co2-cost').value = t.co2Cost || '';
   const linkedMiles = milesLog.filter(mv => mv.sourceTripId === t.id);
   document.getElementById('t-miles').value = (linkedMiles.find(mv => mv.category === 'Flüge') || {}).amount || '';
   document.getElementById('t-exec-miles').value = (linkedMiles.find(mv => mv.category === 'Executive Meilen') || {}).amount || '';
@@ -2294,7 +2326,9 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     noPoints: document.getElementById('t-nopoints').checked,
     flightInfo: readFlightRows(),
     pointsOverride: parseInt(document.getElementById('t-points-override').value) || 0,
-    cost: parseFloat(document.getElementById('t-cost').value) || 0
+    cost: parseFloat(document.getElementById('t-cost').value) || 0,
+    paidBy: document.getElementById('t-paidby').value === 'other' ? 'other' : 'self',
+    co2Cost: parseFloat(document.getElementById('t-co2-cost').value) || 0
   };
   if (isEdit) {
     const idx = trips.findIndex(t => t.id === tripId);
@@ -2369,10 +2403,12 @@ document.getElementById('calc-form').addEventListener('submit', async (e) => {
     points: parseInt(document.getElementById('c-points').value) || 0,
     qp: parseInt(document.getElementById('c-qp').value) || 0,
     co2: parseInt(document.getElementById('c-co2').value) || 0,
-    note: document.getElementById('c-note').value
+    note: document.getElementById('c-note').value,
+    date: document.getElementById('c-date').value || new Date().toISOString().slice(0, 10)
   });
   await saveValueLog();
   e.target.reset();
+  document.getElementById('c-date').value = new Date().toISOString().slice(0, 10);
   render();
 });
 
