@@ -465,3 +465,7 @@ details[open] > .tf-summary::after { content: '▴'; }
 .sp-table td:first-child { white-space: normal; min-width: 0; }
 .sp-note { font-size: 11px; color: var(--muted); font-weight: 400; }
 .sp-total td { border-top: 2px solid var(--gray-border); }
+
+/* Klasse je Segment im Trip-Formular */
+.seg-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px 0; border-top: 1px solid var(--gray-border); }
+.seg-row .seg-label { grid-column: 1 / -1; font-weight: 700; color: var(--navy); font-size: 13px; }

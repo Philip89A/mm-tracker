@@ -211,9 +211,32 @@ function pointsForSegment(range, cls) {
 function tripPoints(t) {
   if (t.noPoints) return 0; // "nur Flugdaten": archivierter Flug, Punkte bewusst nicht berechnet
   if (t.pointsOverride > 0) return t.pointsOverride;
-  const base = pointsForSegment(t.range, t.cls) * t.segments;
+  const base = tripSegments(t).reduce((s, g) => s + pointsForSegment(g.range, g.cls), 0);
   const bonus = Math.round(base * (t.co2 / 100));
   return base + bonus;
+}
+
+// Klasse und Reichweite je Segment. Normalerweise gilt für alle Segmente dieselbe Klasse (t.cls);
+// bei Zwischenstopps kann eine Teilstrecke Business und die andere Economy sein: dann steht in
+// t.segCls eine Liste mit Klasse und Reichweite je Segment (Länge = Zahl der Segmente).
+function tripSegments(t) {
+  const n = Math.max(1, t.segments || 1);
+  if (Array.isArray(t.segCls) && t.segCls.length === n) {
+    return t.segCls.map(s => ({ cls: (s && s.cls) || t.cls, range: (s && s.range) || t.range }));
+  }
+  return Array.from({ length: n }, () => ({ cls: t.cls, range: t.range }));
+}
+
+function tripRangeLabel(t) {
+  const rs = [...new Set(tripSegments(t).map(g => g.range))];
+  return rs.length > 1 ? 'Kont. + Interkont.' : (rs[0] === 'continental' ? 'Kontinental' : 'Interkont.');
+}
+
+// Anzeige der Klasse(n) eines Trips, z.B. „Business + Economy“ bei gemischten Segmenten.
+function tripClassLabel(t) {
+  const seen = [];
+  tripSegments(t).forEach(g => { if (!seen.includes(g.cls)) seen.push(g.cls); });
+  return seen.map(labelClass).join(' + ');
 }
 
 // QP eines Trips: bei Lufthansa-Group-Flügen identisch zu den Points, bei
@@ -232,9 +255,12 @@ const QP_AIRLINES_PARTNER = ['air canada', 'united', 'singapore airlines', 'ana'
 // nach dem Upgrade) — dieser Wert dient nur der €/QP-Auswertung des Aufpreises
 // und wird NIRGENDS auf die Summen aufgeschlagen.
 function tripUpgradeDeltaQP(t) {
-  if (!t.upgradeFrom || t.upgradeFrom === t.cls) return 0;
-  const delta = segmentPointsWithCo2(t.range, t.cls, t.co2) - segmentPointsWithCo2(t.range, t.upgradeFrom, t.co2);
-  return Math.max(0, delta) * (t.segments || 1);
+  if (!t.upgradeFrom) return 0;
+  // Nur Segmente, die tatsächlich höher als die gebuchte Klasse geflogen werden, bringen Zusatzpunkte.
+  return tripSegments(t).reduce((s, g) => {
+    if (g.cls === t.upgradeFrom) return s;
+    return s + Math.max(0, segmentPointsWithCo2(g.range, g.cls, t.co2) - segmentPointsWithCo2(g.range, t.upgradeFrom, t.co2));
+  }, 0);
 }
 
 // Eigene Ausgaben eines Trips und was sie gebracht haben, getrennt nach Flug, Upgrade und
@@ -248,9 +274,7 @@ function tripSpend(t) {
   const total = tripPoints(t);
   let fp = total, up = 0, co2p = 0;
   if (!t.noPoints && !(t.pointsOverride > 0)) {
-    const seg = t.segments || 1;
-    const origCls = t.upgradeFrom && t.upgradeFrom !== t.cls ? t.upgradeFrom : t.cls;
-    const base0 = pointsForSegment(t.range, origCls) * seg;
+    const base0 = tripSegments(t).reduce((s, g) => s + pointsForSegment(g.range, t.upgradeFrom && t.upgradeFrom !== g.cls ? t.upgradeFrom : g.cls), 0);
     up = tripUpgradeDeltaQP(t);
     co2p = Math.max(0, total - base0 - up);
     fp = total - up - co2p;
@@ -781,10 +805,22 @@ function readTripFilters() {
 }
 
 // Teilstrecken-Filter (Flugzeug, Kennzeichen, Kabine, Sitzart, Suche). Kabine: laut Flugdaten, sonst Klasse des Trips.
+// Klasse einer Teilstrecke: Kabine laut Flugdaten, sonst die Klasse des zugehörigen Segments (bei gemischten Segmenten), sonst null.
+function legClassOf(f, t) {
+  if (CABIN_TO_CLASS[f.cabin]) return CABIN_TO_CLASS[f.cabin];
+  const codes = parseRoute(t.route).known, segs = tripSegments(t);
+  const idx = f.from ? codes.findIndex((c, i) => c === f.from && codes[i + 1] === f.to) : -1;
+  if (idx >= 0 && segs.length === codes.length - 1) return segs[idx].cls;
+  return segs.every(s => s.cls === segs[0].cls) ? segs[0].cls : null;
+}
+
 function legMatchesFilters(f, t, F) {
   if (F.aircraft && String(f.aircraft || '').trim().toUpperCase() !== F.aircraft) return false;
   if (F.reg && String(f.registration || '').trim().toUpperCase() !== F.reg) return false;
-  if (F.cls && (CABIN_TO_CLASS[f.cabin] || t.cls) !== F.cls) return false;
+  if (F.cls) {
+    const c = legClassOf(f, t);
+    if (c === null ? !tripSegments(t).some(s => s.cls === F.cls) : c !== F.cls) return false;
+  }
   if (F.seatKind) {
     if (!f.seat) return false;
     const k = seatKind(f);
@@ -909,7 +945,7 @@ function renderTrips() {
       <div class="top">
         <div>
           <div class="route">${escHtml(t.route)}</div>
-          <div class="meta">${t.date} · ${t.range === 'continental' ? 'Kontinental' : 'Interkont.'} · ${labelClass(t.cls)} · ${t.segments} Segm.${t.co2 > 0 ? ' · CO₂ +' + t.co2 + '%' : ''}${t.airline ? ' · ' + escHtml(t.airline) : ''}${t.qpMode === 'pointsOnly' ? ' · Partner' : ''}</div>
+          <div class="meta">${t.date} · ${tripRangeLabel(t)} · ${tripClassLabel(t)} · ${t.segments} Segm.${t.co2 > 0 ? ' · CO₂ +' + t.co2 + '%' : ''}${t.airline ? ' · ' + escHtml(t.airline) : ''}${t.qpMode === 'pointsOnly' ? ' · Partner' : ''}</div>
           ${t.paidBy === 'other' ? `<div class="meta">💼 Flug zahlt Arbeitgeber/Dritte${t.cost > 0 ? ' (' + t.cost.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €, nicht in deinen Ausgaben)' : ''}</div>` : ''}
           ${t.cost > 0 && t.paidBy !== 'other' ? `<div class="meta">💶 ${t.cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} €${tripQP(t) > 0 ? ' · ' + (t.cost / tripQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP' : (tripPoints(t) > 0 ? ' · ' + (t.cost / tripPoints(t)).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/Point (keine QP)' : '')}</div>` : ''}
           ${t.historical ? `<div class="meta"><span class="tag mid">🕰️ Historisch — nicht in Gesamtsumme</span></div>` : ''}
@@ -1490,8 +1526,8 @@ window.exportTripsCsv = function() {
     t.date,
     t.route,
     t.airline || '',
-    t.range === 'continental' ? 'Kontinental' : 'Interkontinental',
-    labelClass(t.cls),
+    tripRangeLabel(t),
+    tripClassLabel(t),
     t.segments,
     t.co2,
     tripPoints(t),
@@ -2278,6 +2314,8 @@ window.startEditTrip = function(idx) {
   document.getElementById('t-range').value = t.range || 'continental';
   document.getElementById('t-class').value = t.cls || 'economy';
   document.getElementById('t-segments').value = t.segments || 1;
+  rebuildSegRows(t.segCls ? t.segCls.map(g => ({ cls: g.cls === t.cls ? '' : g.cls, range: g.range === t.range ? '' : g.range })) : []);
+  document.getElementById('t-seg-details').open = !!t.segCls;
   document.getElementById('t-co2').value = String(t.co2 || 0);
   document.getElementById('t-note').value = t.note || '';
   document.getElementById('t-historical').checked = !!t.historical;
@@ -2313,6 +2351,39 @@ window.startEditTrip = function(idx) {
   document.getElementById('t-date').scrollIntoView({ behavior: 'smooth', block: 'center' });
 };
 
+// ---------- Klasse/Reichweite je Segment im Trip-Formular ----------
+
+const SEG_CLASS_OPTIONS = [['economy', 'Economy'], ['premium', 'Premium Economy'], ['business', 'Business'], ['first', 'First']];
+
+function readSegRowsRaw() {
+  return [...document.querySelectorAll('#t-seg-rows .seg-row')].map(r => ({ cls: r.querySelector('.sg-cls').value, range: r.querySelector('.sg-range').value }));
+}
+
+// Eine Zeile je Segment; vorhandene Auswahl bleibt erhalten, wenn sich Strecke oder Segmentzahl ändern.
+function rebuildSegRows(prefill) {
+  const wrap = document.getElementById('t-seg-rows');
+  if (!wrap) return;
+  const n = Math.min(12, Math.max(1, parseInt(document.getElementById('t-segments').value) || 1));
+  const old = prefill || readSegRowsRaw();
+  const codes = parseRoute(document.getElementById('t-route').value).known;
+  const named = codes.length - 1 === n;
+  wrap.innerHTML = Array.from({ length: n }, (_, i) => {
+    const v = old[i] || { cls: '', range: '' };
+    return `<div class="seg-row"><div class="seg-label">${named ? escHtml(codes[i] + '→' + codes[i + 1]) : 'Segment ' + (i + 1)}</div>
+      <select class="sg-cls"><option value="">Klasse wie oben</option>${SEG_CLASS_OPTIONS.map(([k, l]) => `<option value="${k}"${v.cls === k ? ' selected' : ''}>${l}</option>`).join('')}</select>
+      <select class="sg-range"><option value="">Reichweite wie oben</option><option value="continental"${v.range === 'continental' ? ' selected' : ''}>Kontinental</option><option value="intercontinental"${v.range === 'intercontinental' ? ' selected' : ''}>Interkontinental</option></select></div>`;
+  }).join('');
+}
+
+// Liefert die Segmentliste für t.segCls — nur, wenn mindestens ein Segment abweicht.
+function readSegCls(tripCls, tripRange) {
+  const raw = readSegRowsRaw();
+  const list = raw.map(r => ({ cls: r.cls || tripCls, range: r.range || tripRange }));
+  return list.some(g => g.cls !== tripCls || g.range !== tripRange) ? list : undefined;
+}
+['t-route', 't-segments'].forEach(id => document.getElementById(id).addEventListener('input', () => rebuildSegRows()));
+rebuildSegRows();
+
 // Buchungen (mehrere Trips zusammen bezahlt): bookingId mit nur einem Trip ist bedeutungslos und wird entfernt.
 function pruneBookings() {
   const count = {};
@@ -2344,6 +2415,8 @@ window.cancelEditTrip = function() {
   tripReceiptFiles = []; tripSessionUploads = []; tripFilesToDelete = []; pendingTripId = null;
   document.getElementById('trip-form').reset();
   document.getElementById('t-segments').value = 2;
+  rebuildSegRows([]);
+  document.getElementById('t-seg-details').open = false;
   if (typeof renderReceiptFiles === 'function') renderReceiptFiles();
   loadFlightRows([]);
   document.getElementById('trip-submit-btn').textContent = 'Trip speichern';
@@ -2366,6 +2439,7 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     range: document.getElementById('t-range').value,
     cls: document.getElementById('t-class').value,
     segments: parseInt(document.getElementById('t-segments').value) || 1,
+    segCls: readSegCls(document.getElementById('t-class').value, document.getElementById('t-range').value),
     co2: parseInt(document.getElementById('t-co2').value) || 0,
     note: document.getElementById('t-note').value,
     historical: document.getElementById('t-historical').checked,

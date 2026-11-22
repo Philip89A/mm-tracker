@@ -450,6 +450,11 @@
             </select>
           </div>
         </div>
+        <details id="t-seg-details" style="margin-top:10px;">
+          <summary style="cursor:pointer; font-weight:600; color:var(--navy);">✂️ Klasse je Segment (z.B. Zwischenstopp: ein Teil Business, der andere Economy)</summary>
+          <p class="hint" style="margin:6px 0;">Nur ausfüllen, wenn die Teilstrecken in unterschiedlichen Klassen oder Reichweiten geflogen wurden. „wie oben“ übernimmt Klasse und Reichweite aus dem Trip. Die Points werden dann je Segment berechnet. Bei Strecken wie FRA–VIE–FRA mit zwei Segmenten stehen hier die Teilstrecken FRA→VIE und VIE→FRA; bei vier Segmenten (Hin und Rück mit Stopp) nummeriert die App einfach durch.</p>
+          <div id="t-seg-rows"></div>
+        </details>
         <label>Airline (optional)</label>
         <input type="text" id="t-airline" list="airline-list" placeholder="z.B. Lufthansa, SWISS, Discover" autocomplete="off">
         <datalist id="airline-list">

@@ -375,7 +375,7 @@
     flown.forEach(t => {
       segs += t.segments || 0; pts += tripPoints(t); qp += tripQP(t);
       if (t.cost > 0) { cost += t.cost; if (tripQP(t) > 0) { costQp += t.cost; costQpTrips += tripQP(t); } }
-      classes[t.cls] = (classes[t.cls] || 0) + (t.segments || 0);
+      tripSegments(t).forEach(g => { classes[g.cls] = (classes[g.cls] || 0) + 1; });
       const al = (t.airline || '').trim() || 'ohne Angabe';
       airlines.set(al, (airlines.get(al) || 0) + (t.segments || 0));
       MMMap.tripLegs(t).forEach(l => {
