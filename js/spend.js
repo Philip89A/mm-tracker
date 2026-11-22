@@ -157,14 +157,19 @@
     const r = compute(year, false);
     const rows = [['✈️ Flug', r.cat.flight], ['⬆️ Upgrade', r.cat.upgrade], ['🌱 CO₂-Ausgleich', r.cat.co2], ['🧾 Weitere', r.cat.other]].filter(([, c]) => c.cost > 0 || c.n);
     const tot = rows.reduce((s, [, c]) => ({ cost: s.cost + c.cost, p: s.p + c.p, q: s.q + c.q }), { cost: 0, p: 0, q: 0 });
+    // Noch nicht geflogene (geplante) Trips mit Ausgaben, getrennt ausgewiesen
+    const rp = compute(year, true);
+    const plannedExtra = ['flight', 'upgrade', 'co2'].reduce((s, k) => ({ cost: s.cost + rp.cat[k].cost - r.cat[k].cost, q: s.q + rp.cat[k].q - r.cat[k].q }), { cost: 0, q: 0 });
+    const plannedLine = plannedExtra.cost > 0 ? `<div class="hint" style="margin:8px 0 0;">📅 Dazu geplant (noch nicht geflogen): ${eur(plannedExtra.cost)} für +${fmt(plannedExtra.q)} QP — in der Auswertung unter „Geplante Trips: einrechnen“.</div>` : '';
     if (!rows.length) {
-      el.innerHTML = `<div class="empty">Für ${esc(year)} sind noch keine eigenen Ausgaben erfasst. Preise trägst du im Trip-Formular ein (Flug, Upgrade, CO₂-Ausgleich).</div>
-        <button type="button" class="btn small secondary" onclick="openSpendPage()">Zur Ausgaben-Auswertung</button>`;
+      el.innerHTML = `<div class="empty">Für ${esc(year)} sind noch keine eigenen Ausgaben von geflogenen Trips erfasst. Preise trägst du im Trip-Formular ein (Flug, Upgrade, CO₂-Ausgleich).</div>${plannedLine}
+        <button type="button" class="btn small secondary" style="margin-top:8px;" onclick="openSpendPage()">Zur Ausgaben-Auswertung</button>`;
       return;
     }
     const kpi = (n, l) => `<div class="stat"><div class="num" style="font-size:17px;">${n}</div><div class="lbl">${l}</div></div>`;
     el.innerHTML = `<div class="stat-row" style="margin-bottom:8px;">${kpi(eur(tot.cost), 'Eigene Ausgaben')}${kpi(`${fmt(tot.p)} P`, `${fmt(tot.q)} QP dafür`)}${kpi(ratio(tot.cost, tot.q), 'Ø je QP')}</div>` +
       rows.map(([label, c]) => `<div class="sim-row"><span>${label}</span><span><b>${eur(c.cost)}</b> <span class="meta" style="color:var(--muted);">· ${c.q > 0 ? ratio(c.cost, c.q) + '/QP' : '–'}</span></span></div>`).join('') +
+      plannedLine +
       `<button type="button" class="btn small secondary" style="margin-top:8px;" onclick="openSpendPage()">Details &amp; Belege ansehen</button>`;
   }
   window.renderSpendCard = renderSpendCard;
