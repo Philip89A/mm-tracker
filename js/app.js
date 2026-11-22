@@ -531,6 +531,7 @@ function render() {
     (typeof renderVouchers === 'function' ? renderVouchers : function renderVouchers() {}),
     (typeof renderSim === 'function' ? renderSim : function renderSim() {}),
     (typeof renderSpend === 'function' ? renderSpend : function renderSpend() {}),
+    (typeof renderSpendCard === 'function' ? renderSpendCard : function renderSpendCard() {}),
     (typeof renderYearPlan === 'function' ? renderYearPlan : function renderYearPlan() {}),
     (typeof renderStats === 'function' ? renderStats : function renderStats() {}),
     (typeof renderBackupStatus === 'function' ? renderBackupStatus : function renderBackupStatus() {}),
@@ -681,6 +682,7 @@ const DASH_CARDS = [
   { id: 'gutscheine', label: 'Gutscheine & Benefits' },
   { id: 'fristen', label: 'Fristen & Ablaufdaten' },
   { id: 'basis', label: 'Basiswerte & Boden-Punkte' },
+  { id: 'ausgaben', label: 'Eigene Ausgaben' },
   { id: 'archiv', label: 'Jahres-Archiv' }
 ];
 

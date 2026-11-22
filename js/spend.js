@@ -148,6 +148,35 @@
   }
   window.renderSpend = renderSpend;
 
+  // Dashboard-Karte: Kurzfassung für das gewählte Saisonjahr mit Sprung zur Detailseite
+  function renderSpendCard() {
+    const el = $('dash-spend');
+    if (!el) return;
+    const year = seasonYear();
+    $('dash-spend-year').textContent = year;
+    const r = compute(year, false);
+    const rows = [['✈️ Flug', r.cat.flight], ['⬆️ Upgrade', r.cat.upgrade], ['🌱 CO₂-Ausgleich', r.cat.co2], ['🧾 Weitere', r.cat.other]].filter(([, c]) => c.cost > 0 || c.n);
+    const tot = rows.reduce((s, [, c]) => ({ cost: s.cost + c.cost, p: s.p + c.p, q: s.q + c.q }), { cost: 0, p: 0, q: 0 });
+    if (!rows.length) {
+      el.innerHTML = `<div class="empty">Für ${esc(year)} sind noch keine eigenen Ausgaben erfasst. Preise trägst du im Trip-Formular ein (Flug, Upgrade, CO₂-Ausgleich).</div>
+        <button type="button" class="btn small secondary" onclick="openSpendPage()">Zur Ausgaben-Auswertung</button>`;
+      return;
+    }
+    const kpi = (n, l) => `<div class="stat"><div class="num" style="font-size:17px;">${n}</div><div class="lbl">${l}</div></div>`;
+    el.innerHTML = `<div class="stat-row" style="margin-bottom:8px;">${kpi(eur(tot.cost), 'Eigene Ausgaben')}${kpi(`${fmt(tot.p)} P`, `${fmt(tot.q)} QP dafür`)}${kpi(ratio(tot.cost, tot.q), 'Ø je QP')}</div>` +
+      rows.map(([label, c]) => `<div class="sim-row"><span>${label}</span><span><b>${eur(c.cost)}</b> <span class="meta" style="color:var(--muted);">· ${c.q > 0 ? ratio(c.cost, c.q) + '/QP' : '–'}</span></span></div>`).join('') +
+      `<button type="button" class="btn small secondary" style="margin-top:8px;" onclick="openSpendPage()">Details &amp; Belege ansehen</button>`;
+  }
+  window.renderSpendCard = renderSpendCard;
+  window.openSpendPage = function () {
+    document.querySelector('[data-tab="tab-rechner"]').click();
+    MMSim.setRechnerPage('value');
+    const ysel = $('sp-year'), y = String(seasonYear());
+    if ([...ysel.options].some(o => o.value === y)) ysel.value = y;
+    renderSpend();
+    window.scrollTo(0, 0);
+  };
+
   // CSV für Reisekostenabrechnung o. Ä.: eine Zeile je Ausgabe (Flug, Upgrade, CO₂, Wertrechner)
   window.exportSpendCsv = function () {
     const r = compute($('sp-year').value, !!$('sp-planned').value);
