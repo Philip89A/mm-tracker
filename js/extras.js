@@ -363,111 +363,10 @@
     render();
   };
 
-  function renderStats() {
-    const el = document.getElementById('stats-body');
-    if (!el || !window.MMMap) return;
-    const flown = getFilteredTrips().filter(t => !t.planned);
-    if (!flown.length) { el.innerHTML = '<div class="empty">Keine geflogenen Trips für diesen Filter.</div>'; return; }
-
-    let segs = 0, km = 0, pts = 0, qp = 0, cost = 0, costQp = 0, costQpTrips = 0;
-    const routes = new Map(), airports = new Map(), airlines = new Map(), classes = {}, countries = new Set();
-    let longest = null;
-    flown.forEach(t => {
-      segs += t.segments || 0; pts += tripPoints(t); qp += tripQP(t);
-      if (t.cost > 0) { cost += t.cost; if (tripQP(t) > 0) { costQp += t.cost; costQpTrips += tripQP(t); } }
-      tripSegments(t).forEach(g => { classes[g.cls] = (classes[g.cls] || 0) + 1; });
-      const al = (t.airline || '').trim() || 'ohne Angabe';
-      airlines.set(al, (airlines.get(al) || 0) + (t.segments || 0));
-      MMMap.tripLegs(t).forEach(l => {
-        km += l.km * l.weight;
-        const key = [l.from, l.to].sort().join(' – ');
-        routes.set(key, (routes.get(key) || 0) + l.weight);
-        [l.from, l.to].forEach(c => { airports.set(c, (airports.get(c) || 0) + l.weight / 2); countries.add(AIRPORTS[c][3]); });
-        if (!longest || l.km > longest.km) longest = { label: `${l.from} – ${l.to}`, km: l.km };
-      });
-    });
-    const top = (map, n) => [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
-
-    const kpi = (n, l) => `<div class="stat"><div class="num" style="font-size:18px;">${n}</div><div class="lbl">${l}</div></div>`;
-    let html = `<div class="stat-row" style="flex-wrap:wrap;">${kpi(flown.length, 'Trips')}${kpi(fmt(segs), 'Segmente')}${kpi(fmt(km), 'Flug-km')}</div>
-      <div class="stat-row" style="flex-wrap:wrap; margin-top:8px;">${kpi(fmt(pts), 'Points')}${kpi(fmt(qp), 'QP')}${kpi(countries.size, 'Länder')}</div>`;
-
-    const facts = [];
-    if (segs) facts.push(`Ø ${fmt(pts / segs)} Points und ${fmt(km / segs)} km je Segment`);
-    if (longest) facts.push(`Längste Teilstrecke: ${longest.label} (${fmt(longest.km)} km)`);
-    if (cost > 0) facts.push(`Ausgaben: ${cost.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €${costQpTrips > 0 ? ` · Ø ${(costQp / costQpTrips).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €/QP` : ''}`);
-    if (facts.length) html += `<p class="hint" style="margin:10px 0 0;">${facts.join('<br>')}</p>`;
-
-    html += block('Top-Strecken', bars(top(routes, 5).map(([k, v]) => ({ label: k, value: v, text: Math.round(v) + '×' })), ''));
-    html += block('Top-Flughäfen', bars(top(airports, 5).map(([k, v]) => ({ label: `${k} · ${AIRPORTS[k][2]}`, value: v, text: Math.round(v) + '×' })), ''));
-    html += block('Airlines (Segmente)', bars(top(airlines, 5).map(([k, v]) => ({ label: k, value: v, text: fmt(v) })), ''));
-
-    const clsLabel = { economy: 'Economy', premium: 'Premium Eco.', business: 'Business', first: 'First' };
-    const clsColor = { economy: '#adb5bd', premium: '#74c0fc', business: '#1f4e8c', first: '#c9a227' };
-    const totalSeg = Object.values(classes).reduce((a, b) => a + b, 0) || 1;
-    html += block('Klassen (Anteil der Segmente)',
-      `<div style="display:flex; height:12px; border-radius:6px; overflow:hidden; margin-top:6px;">${Object.keys(clsLabel).filter(c => classes[c]).map(c => `<div style="width:${classes[c] / totalSeg * 100}%; background:${clsColor[c]};" title="${clsLabel[c]}"></div>`).join('')}</div>
-       <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:6px; font-size:11.5px; color:var(--muted);">${Object.keys(clsLabel).filter(c => classes[c]).map(c => `<span><span style="display:inline-block; width:9px; height:9px; border-radius:50%; background:${clsColor[c]}; margin-right:4px;"></span>${clsLabel[c]} ${Math.round(classes[c] / totalSeg * 100)} %</span>`).join('')}</div>`);
-
-    // Flugzeuge & Sitze: nur Teilstrecken, für die Details hinterlegt sind und die die Teilstrecken-Filter erfüllen
-    const legInfos = getFilteredLegs().map(x => x.f);
-    const tally = (key, norm = x => x) => {
-      const m = new Map();
-      legInfos.forEach(f => { const v = norm((f[key] || '').trim()); if (v) m.set(v, (m.get(v) || 0) + 1); });
-      return m;
-    };
-    if (legInfos.length) {
-      const types = tally('aircraft'), tails = tally('registration'), seats = tally('seat');
-      const letters = tally('seat', s => (s.match(/[A-Z]$/) || [''])[0]);
-      const rep = new Map([...tails].filter(([, n]) => n > 1));
-      const asBars = (m, n) => bars(top(m, n).map(([k, v]) => ({ label: k, value: v, text: v + '×' })), '');
-      html += `<p class="hint" style="margin:16px 0 0;"><b>Flugzeuge &amp; Sitze</b> — Basis: ${legInfos.length} Teilstrecken mit hinterlegten Flugdetails.</p>`;
-      // Flugzeit aus den Dauern („2h 16m“), Lieblingsmaschine und Zahl verschiedener Flugzeuge
-      const minutes = (s) => { const h = /(\d+)\s*h/.exec(s || ''), m = /(\d+)\s*m/.exec(s || ''); return (h ? +h[1] * 60 : 0) + (m ? +m[1] : 0); };
-      const withDur = legInfos.filter(f => minutes(f.duration) > 0);
-      const airMin = withDur.reduce((s, f) => s + minutes(f.duration), 0);
-      const favTail = top(tails, 1)[0];
-      const facts2 = [];
-      if (withDur.length) facts2.push(`Flugzeit gesamt: ${Math.floor(airMin / 60)} h ${String(airMin % 60).padStart(2, '0')} min auf ${withDur.length} Teilstrecken (Ø ${Math.round(airMin / withDur.length)} min)`);
-      if (tails.size) facts2.push(`${tails.size} verschiedene Flugzeuge${favTail && favTail[1] > 1 ? ` · Lieblingsmaschine ${favTail[0]} (${favTail[1]}×)` : ''}`);
-      if (facts2.length) html += `<p class="hint" style="margin:4px 0 0;">${facts2.join('<br>')}</p>`;
-      const cabins = tally('cabin', c => ({ E: 'Economy', W: 'Premium Eco.', B: 'Business', F: 'First' }[c] || c));
-      html += block('Flugzeugtypen', asBars(types, 6));
-      html += block('Kabine laut Flugdaten', asBars(cabins, 4));
-      html += block('Kennzeichen (am häufigsten)', rep.size ? asBars(rep, 5) : (tails.size ? '<div class="hint" style="margin:4px 0 0;">Noch kein Flugzeug mehrfach geflogen.</div>' : ''));
-      html += block('Sitzplätze (am häufigsten)', asBars(seats, 5));
-      html += block('Sitzbuchstaben', asBars(letters, 6));
-
-      // Sitzart (Fenster/Mitte/Gang) nach der Typ-Regel; Typen ohne bestätigte Anordnung werden abgefragt
-      const withSeat = legInfos.filter(f => f.seat);
-      const kinds = new Map();
-      withSeat.forEach(f => { const k = seatKind(f); if (k) kinds.set(SEAT_KINDS[k], (kinds.get(SEAT_KINDS[k]) || 0) + 1); });
-      const unknownTypes = new Map();   // Typ -> Sitze
-      withSeat.filter(f => !seatKind(f)).forEach(f => {
-        const t = (f.aircraft || '').trim().toUpperCase() || '(Typ fehlt)';
-        (unknownTypes.get(t) || unknownTypes.set(t, []).get(t)).push(f.seat);
-      });
-      html += block(`Sitzart (${[...kinds.values()].reduce((a, b) => a + b, 0)} von ${withSeat.length} Sitzen zugeordnet)`, asBars(kinds, 3));
-      html += seatRuleBlock(unknownTypes);
-    }
-
-    // Je Jahr: alle geflogenen Trips, unabhängig vom Jahresfilter (die übrigen Filter gelten)
-    const byYear = {};
-    getFilteredTrips({ ignoreYear: true }).filter(t => !t.planned && t.date).forEach(t => {
-      const y = t.date.slice(0, 4);
-      const b = (byYear[y] = byYear[y] || { n: 0, seg: 0, km: 0, p: 0, q: 0, c: 0 });
-      b.n += 1; b.seg += t.segments || 0; b.km += MMMap.tripKm(t); b.p += tripPoints(t); b.q += tripQP(t); b.c += t.cost || 0;
-    });
-    const years = Object.keys(byYear).sort().reverse();
-    if (years.length) {
-      const best = years.reduce((a, b) => byYear[b].p > byYear[a].p ? b : a);
-      html += block('Je Jahr', `<div style="overflow-x:auto;"><table><thead><tr><th>Jahr</th><th>Trips</th><th>Segm.</th><th>km</th><th>Points</th><th>QP</th>${years.some(y => byYear[y].c > 0) ? '<th>€</th>' : ''}</tr></thead><tbody>
-        ${years.map(y => { const b = byYear[y]; return `<tr${y === best ? ' style="font-weight:700;"' : ''}><td>${y}${y === best && years.length > 1 ? ' 🏆' : ''}</td><td>${b.n}</td><td>${fmt(b.seg)}</td><td>${fmt(b.km)}</td><td>${fmt(b.p)}</td><td>${fmt(b.q)}</td>${years.some(z => byYear[z].c > 0) ? `<td>${b.c ? fmt(b.c) : '–'}</td>` : ''}</tr>`; }).join('')}
-        </tbody></table></div>`);
-    }
-    el.innerHTML = html;
-  }
-  window.renderStats = renderStats;
+  // Hilfen für die Statistik in stats.js
+  window.bars = bars;
+  window.statBlock = block;
+  window.seatRuleBlock = seatRuleBlock;
 
   // ================================================================ Backup
 
@@ -543,7 +442,8 @@
     const trip = cands.find(t => tripFlightInfos(t).some(sameLeg(f)));
     const leg = tripFlightInfos(trip).find(sameLeg(f));
     const missing = LEG_FIELDS.filter(k => !String(leg[k] || '').trim() && String(f[k] || '').trim());
-    return missing.length ? { status: 'fill', trip, missing } : { status: 'skip', trip };
+    // Auch ein fehlender Reiseanlass (geschäftlich/privat) wird ergänzt, nie überschrieben.
+    return missing.length || (f.reason && !trip.reason) ? { status: 'fill', trip, missing } : { status: 'skip', trip };
   }
 
   function enrichTrip(t, f) {
@@ -551,6 +451,7 @@
     const legIdx = (x) => codes.findIndex((c, i) => c === x.from && codes[i + 1] === x.to);
     t.flightInfo = [...tripFlightInfos(t), legInfoFor(f)].sort((a, b) => legIdx(a) - legIdx(b));
     if (!(t.airline || '').trim() && f.airline) t.airline = f.airline;
+    if (!t.reason && f.reason) t.reason = f.reason;
   }
 
   function fillTrip(t, f, missing) {
@@ -560,6 +461,7 @@
     if (!leg.date) leg.date = f.date;
     t.flightInfo = infos;
     if (!(t.airline || '').trim() && f.airline) t.airline = f.airline;
+    if (!t.reason && f.reason) t.reason = f.reason;
   }
 
   // Reichweite nur als Anzeige-Label der Archivflüge: Europa (inkl. Kanaren) <-> Europa = kontinental.
@@ -598,7 +500,7 @@
         trips.push({
           id: genId(), date: f.date, route: `${f.from}–${f.to}`, range: importRange(f), cls: IMPORT_CLASS[f.cabin] || 'economy',
           segments: 1, co2: 0, note: 'Archivflug (Flighty-Import)', historical: false, planned: false, airline: f.airline || '',
-          upgradeFrom: '', upgradeCost: 0, qpMode: '', noPoints: true, pointsOverride: 0, cost: 0,
+          upgradeFrom: '', upgradeCost: 0, qpMode: '', noPoints: true, pointsOverride: 0, cost: 0, reason: f.reason || '',
           flightInfo: [legInfoFor(f)]
         });
       });

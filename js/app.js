@@ -2351,6 +2351,7 @@ window.startEditTrip = function(idx) {
   document.getElementById('t-points-override').value = t.pointsOverride || '';
   document.getElementById('t-cost').value = t.cost || '';
   document.getElementById('t-paidby').value = t.paidBy === 'other' ? 'other' : 'self';
+  document.getElementById('t-reason').value = t.reason || '';
   document.getElementById('t-co2-cost').value = t.co2Cost || '';
   document.getElementById('t-rc-flight').value = t.receiptNo || '';
   document.getElementById('t-rc-upgrade').value = t.upgradeReceiptNo || '';
@@ -2475,6 +2476,7 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     pointsOverride: parseInt(document.getElementById('t-points-override').value) || 0,
     cost: parseFloat(document.getElementById('t-cost').value) || 0,
     paidBy: document.getElementById('t-paidby').value === 'other' ? 'other' : 'self',
+    reason: document.getElementById('t-reason').value,
     co2Cost: parseFloat(document.getElementById('t-co2-cost').value) || 0
   };
   // Zusammen gebuchte Trips teilen sich eine bookingId (Preise und Belege gelten für die ganze Buchung).

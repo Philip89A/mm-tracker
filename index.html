@@ -382,7 +382,7 @@
 
     <div class="card tp tp-over" id="card-stats">
       <h2>📊 Statistik</h2>
-      <p class="hint" style="margin-top:0;">Gilt für alle Filter oben (nur bereits geflogene, nicht geplante Trips — auch historisch markierte). Points/QP hier sind reine Trip-Summen, also ohne Basiswert, Hotels, Hebel und Boden-Punkte; die offiziellen Stände zeigen Dashboard und Jahresvergleich. Die Tabelle „Je Jahr“ ignoriert nur den Jahresfilter.</p>
+      <p class="hint" style="margin-top:0;">Gilt für alle Filter oben, nur bereits geflogene Trips. Ein „Flug“ ist eine Teilstrecke; Flugzeit, Flugzeug und Sitz zählen nur, wo Flugdetails hinterlegt sind (z.B. aus dem Flighty-Import). Points/QP sind reine Trip-Summen ohne Basiswert, Hotels und Hebel — die offiziellen Stände zeigen Dashboard und Jahresvergleich.</p>
       <div id="stats-body"><div class="empty">Noch keine Trips erfasst.</div></div>
     </div>
 
@@ -510,6 +510,12 @@
             </select>
           </div>
         </div>
+        <label>Reiseanlass</label>
+        <select id="t-reason">
+          <option value="">ohne Angabe</option>
+          <option value="business">Geschäftlich</option>
+          <option value="personal">Privat</option>
+        </select>
         <div class="row2">
           <div>
             <label>Upgrade von (optional)</label>
@@ -1106,6 +1112,7 @@
 <script src="js/app.js"></script>
 <script src="js/map.js"></script>
 <script src="js/extras.js"></script>
+<script src="js/stats.js"></script>
 <script src="js/receipts.js"></script>
 <script src="js/sim.js"></script>
 <script src="js/spend.js"></script>
