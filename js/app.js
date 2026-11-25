@@ -2325,7 +2325,7 @@ function tripFlightInfos(t) {
 function flightInfoText(f) {
   const kind = seatKind(f);
   return [f.flightNo, (f.from && f.to) ? `${f.from}–${f.to}` : '', f.aircraft, f.registration, f.seat ? `Sitz ${f.seat}${kind ? ' (' + SEAT_KINDS[kind] + ')' : ''}` : '',
-    f.cabin ? (CABIN_LABELS[f.cabin] || f.cabin) : '', f.duration, f.miles ? '+' + Number(f.miles).toLocaleString('de-DE') + ' Meilen' : ''].filter(Boolean).join(' · ');
+    f.cabin ? (CABIN_LABELS[f.cabin] || f.cabin) : '', f.duration, ...LEG_MILES.filter(([k]) => f[k]).map(([k, , short]) => '+' + Number(f[k]).toLocaleString('de-DE') + ' ' + (short === 'Meilen' ? 'Meilen' : short + '-Meilen'))].filter(Boolean).join(' · ');
 }
 
 // ---------- Sitzart: Fenster / Mitte / Gang ----------
@@ -2355,14 +2355,16 @@ function seatKind(f) {
 const FLIGHT_ROW_FIELDS = [
   ['flightNo', 'Flugnr.', 'LH 1418'], ['from', 'Von', 'FRA'], ['to', 'Nach', 'OTP'], ['duration', 'Dauer', '2h 16m'],
   ['aircraft', 'Flugzeugtyp', 'A320'], ['registration', 'Kennzeichen', 'D-AIWA'], ['seat', 'Sitz', '15A'], ['date', 'Datum', ''],
-  ['miles', 'Meilen (laut Konto)', '668']
+  ['miles', 'Meilen', '668'], ['execMiles', 'Executive Meilen', '0'], ['co2Miles', 'CO₂-Kompensationsmeilen', '0']
 ];
+// Meilen je Teilstrecke: Feld im Flug → Kategorie im Meilen-Tab
+const LEG_MILES = [['miles', 'Flüge', 'Meilen'], ['execMiles', 'Executive Meilen', 'Executive'], ['co2Miles', 'CO2-Kompensation', 'CO₂']];
 
 function addFlightRow(data = {}) {
   const row = document.createElement('div');
   row.className = 'flight-row';
   row.innerHTML = `<div class="flight-row-grid">${FLIGHT_ROW_FIELDS.map(([k, label, ph]) =>
-      `<div><label>${label}</label><input type="${k === 'date' ? 'date' : 'text'}"${k === 'miles' ? ' inputmode="numeric"' : ''} data-f="${k}" placeholder="${ph}" autocomplete="off" value="${escHtml(data[k] || '')}"></div>`).join('')}
+      `<div><label>${label}</label><input type="${k === 'date' ? 'date' : 'text'}"${LEG_MILES.some(([mk]) => mk === k) ? ' inputmode="numeric"' : ''} data-f="${k}" placeholder="${ph}" autocomplete="off" value="${escHtml(data[k] || '')}"></div>`).join('')}
       <div><label>Kabine</label><select data-f="cabin"><option value="">–</option>${Object.entries(CABIN_LABELS).map(([k, v]) => `<option value="${k}"${data.cabin === k ? ' selected' : ''}>${v}</option>`).join('')}</select></div>
     </div><button type="button" class="btn secondary flight-row-del">Teilstrecke entfernen</button>`;
   row.querySelector('.flight-row-del').addEventListener('click', () => row.remove());
@@ -2385,8 +2387,10 @@ function readFlightRows() {
     f.flightNo = f.flightNo.replace(/\s+/g, '').toUpperCase();
     f.aircraft = f.aircraft.toUpperCase();
     f.seat = f.seat.toUpperCase();
-    const mi = parseInt(String(f.miles || '').replace(/\D/g, ''));
-    if (mi > 0) f.miles = mi; else delete f.miles;
+    LEG_MILES.forEach(([k]) => {
+      const mi = parseInt(String(f[k] || '').replace(/\D/g, ''));
+      if (mi > 0) f[k] = mi; else delete f[k];
+    });
     return f;
   }).filter(f => Object.values(f).some(Boolean));
 }
@@ -2596,16 +2600,16 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     }
   });
   // Meilen je Teilstrecke (so bucht Miles & More: jedes Segment einzeln) — eigene Bewegung je Flug
-  (trip.flightInfo || []).forEach(f => {
-    const amount = parseInt(f.miles) || 0;
+  (trip.flightInfo || []).forEach(f => LEG_MILES.forEach(([k, category]) => {
+    const amount = parseInt(f[k]) || 0;
     if (amount <= 0) return;
     milesLog.push({
-      id: genId(), date: f.date || trip.date, category: 'Flüge', source: '', amount,
+      id: genId(), date: f.date || trip.date, category, source: '', amount,
       note: `Automatisch aus Trip ${trip.route} · ${[f.flightNo, f.from && f.to ? f.from + '→' + f.to : ''].filter(Boolean).join(' ')}`,
       sourceTripId: tripId, sourceLeg: f.flightNo || `${f.from}-${f.to}`
     });
     milesChanged = true;
-  });
+  }));
   if (milesChanged) await saveMilesLog();
 
   // Gespeichert: neue Dateien bleiben, entfernte werden jetzt wirklich gelöscht.
