@@ -1,7 +1,7 @@
 /**
  * Ausgaben-Auswertung (Tab Rechner → Ausgaben): was habe ich selbst bezahlt und was hat es gebracht?
- * Quellen: eigene Ausgaben aus den Trips (Flug, wenn selbst bezahlt; Upgrade; CO₂-Ausgleich) und die
- * Einträge im Wertrechner (Uptrip, Kreditkarte, Sonstiges). Die Aufteilung des Ertrags je Trip steht
+ * Quelle: eigene Ausgaben aus den Trips (Flug, wenn selbst bezahlt; Upgrade; CO₂-Ausgleich). Der
+ * Wertrechner ist eine reine Rechnung und zählt bewusst nicht mit. Die Aufteilung des Ertrags je Trip steht
  * in tripSpend() (app.js). Einträge ohne Preis werden getrennt ausgewiesen und nicht in €/Punkt
  * eingerechnet, damit die Quoten nicht verfälscht werden.
  */
@@ -30,10 +30,10 @@
   const receiptText = (r) => [r.no, r.files ? `📎${r.files}` : ''].filter(Boolean).join(' ');
 
   function compute(year, includePlanned) {
-    const cat = { flight: emptyCat(), upgrade: emptyCat(), co2: emptyCat(), other: emptyCat() };
+    const cat = { flight: emptyCat(), upgrade: emptyCat(), co2: emptyCat() };
     const free = { n: 0, p: 0, q: 0 };
     let flightsNoPrice = 0;
-    const perTrip = [], other = [];
+    const perTrip = [];
     const inYear = (d) => !year || (d || '').startsWith(year);
 
     // Kosten je Buchung: bei zusammen gebuchten Trips genügt es, den Preis bei einem Trip einzutragen
@@ -76,36 +76,26 @@
       if (own.length) perTrip.push({ t, own });
     });
 
-    // Wertrechner-Einträge: ohne Datum nur im Zeitraum „Alle Jahre“
-    valueLog.forEach(v => {
-      if (year && !(v.date || '').startsWith(year)) return;
-      const co2 = v.co2 || 0;
-      const p = (v.points || 0) + Math.round((v.points || 0) * co2 / 100);
-      const q = (v.qp || 0) + Math.round((v.qp || 0) * co2 / 100);
-      const c = cat.other;
-      c.cost += v.cost || 0; c.p += p; c.q += q; c.n++;
-      if (v.cost > 0) other.push(v);
-    });
-    const missing = perTrip.reduce((s, x) => s + x.own.filter(o => o[1] > 0 && !hasReceipt(o[4])).length, 0) + other.filter(v => !v.receiptNo).length;
-    return { cat, free, flightsNoPrice, perTrip, other, missing };
+    const missing = perTrip.reduce((s, x) => s + x.own.filter(o => o[1] > 0 && !hasReceipt(o[4])).length, 0);
+    return { cat, free, flightsNoPrice, perTrip, missing };
   }
 
   function renderSpend() {
     const body = $('sp-body');
     if (!body) return;
-    // Zeitraum-Auswahl aus Trips und Wertrechner-Einträgen
+    // Zeitraum-Auswahl aus den Trips
     const ysel = $('sp-year'), prev = ysel.value;
-    const years = [...new Set([...trips.map(t => (t.date || '').slice(0, 4)), ...valueLog.map(v => (v.date || '').slice(0, 4))].filter(Boolean))].sort().reverse();
+    const years = [...new Set(trips.map(t => (t.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
     ysel.innerHTML = '<option value="">Alle Jahre</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
     if (years.includes(prev)) ysel.value = prev;
 
     const r = compute(ysel.value, !!$('sp-planned').value);
     const rows = [
-      ['✈️ Flug (von dir bezahlt)', r.cat.flight], ['⬆️ Upgrade', r.cat.upgrade], ['🌱 CO₂-Ausgleich', r.cat.co2], ['🧾 Wertrechner (Uptrip, Karte, Sonstiges)', r.cat.other]
+      ['✈️ Flug (von dir bezahlt)', r.cat.flight], ['⬆️ Upgrade', r.cat.upgrade], ['🌱 CO₂-Ausgleich', r.cat.co2]
     ];
     const tot = rows.reduce((s, [, c]) => ({ cost: s.cost + c.cost, p: s.p + c.p, q: s.q + c.q }), { cost: 0, p: 0, q: 0 });
     if (!tot.cost && !r.free.n && !rows.some(([, c]) => c.unN)) {
-      body.innerHTML = '<div class="empty">Noch keine eigenen Ausgaben erfasst. Im Trip-Formular gibt es Flugpreis („Wer zahlt?“), Upgrade-Kosten und CO₂-Ausgleich; im Wertrechner unten weitere Ausgaben.</div>';
+      body.innerHTML = '<div class="empty">Noch keine eigenen Ausgaben erfasst. Im Trip-Formular gibt es Flugpreis („Wer zahlt?“), Upgrade-Kosten und CO₂-Ausgleich.</div>';
       return;
     }
     // Beste Quelle nach €/QP (nur Zeilen mit Ausgaben und QP)
@@ -155,7 +145,7 @@
     const year = seasonYear();
     $('dash-spend-year').textContent = year;
     const r = compute(year, false);
-    const rows = [['✈️ Flug', r.cat.flight], ['⬆️ Upgrade', r.cat.upgrade], ['🌱 CO₂-Ausgleich', r.cat.co2], ['🧾 Weitere', r.cat.other]].filter(([, c]) => c.cost > 0 || c.n);
+    const rows = [['✈️ Flug', r.cat.flight], ['⬆️ Upgrade', r.cat.upgrade], ['🌱 CO₂-Ausgleich', r.cat.co2]].filter(([, c]) => c.cost > 0 || c.n);
     const tot = rows.reduce((s, [, c]) => ({ cost: s.cost + c.cost, p: s.p + c.p, q: s.q + c.q }), { cost: 0, p: 0, q: 0 });
     // Noch nicht geflogene (geplante) Trips mit Ausgaben, getrennt ausgewiesen
     const rp = compute(year, true);
@@ -182,17 +172,12 @@
     window.scrollTo(0, 0);
   };
 
-  // CSV für Reisekostenabrechnung o. Ä.: eine Zeile je Ausgabe (Flug, Upgrade, CO₂, Wertrechner)
+  // CSV für Reisekostenabrechnung o. Ä.: eine Zeile je Ausgabe (Flug, Upgrade, CO₂)
   window.exportSpendCsv = function () {
     const r = compute($('sp-year').value, !!$('sp-planned').value);
-    const header = ['Datum', 'Strecke/Kanal', 'Kategorie', 'Betrag €', 'Beleg-Nr.', 'Belegdateien', 'Points', 'QP', 'Notiz'];
+    const header = ['Datum', 'Strecke', 'Kategorie', 'Betrag €', 'Beleg-Nr.', 'Belegdateien', 'Points', 'QP', 'Notiz'];
     const rows = [];
     r.perTrip.forEach(({ t, own }) => own.forEach(([n, c, p, q, rcpt]) => rows.push([t.date, t.route, n, c, rcpt.no, rcpt.files || '', p, q, t.note || ''])));
-    r.other.forEach(v => {
-      const co2 = v.co2 || 0;
-      rows.push([v.date || '', v.type, 'Wertrechner', v.cost, v.receiptNo || '', '',
-        (v.points || 0) + Math.round((v.points || 0) * co2 / 100), (v.qp || 0) + Math.round((v.qp || 0) * co2 / 100), v.note || '']);
-    });
     rows.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
     const lines = [header, ...rows].map(row => row.map(csvEscape).join(';'));
     downloadBlob(String.fromCharCode(0xFEFF) + lines.join('\r\n'), 'text/csv;charset=utf-8;', `ausgaben-${new Date().toISOString().slice(0, 10)}.csv`);
@@ -200,5 +185,4 @@
 
   $('sp-year').addEventListener('change', renderSpend);
   $('sp-planned').addEventListener('change', renderSpend);
-  $('c-date').value = new Date().toISOString().slice(0, 10);
 })();

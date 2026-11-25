@@ -943,7 +943,7 @@
     <div class="rp rp-value">
     <div class="card" id="card-spend">
       <h2>💸 Meine Ausgaben &amp; was sie gebracht haben</h2>
-      <p class="hint" style="margin-top:0;">Zeigt, was du selbst bezahlt hast und welche Points/QP dafür herauskamen — getrennt nach Flug (wenn du ihn selbst zahlst), Upgrade und CO₂-Ausgleich aus deinen Trips plus den Einträgen im Wertrechner darunter. Flüge, die der Arbeitgeber zahlt, zählen nicht als Ausgabe; ihr Ertrag steht als „gratis“ separat.</p>
+      <p class="hint" style="margin-top:0;">Zeigt, was du selbst bezahlt hast und welche Points/QP dafür herauskamen — getrennt nach Flug (wenn du ihn selbst zahlst), Upgrade und CO₂-Ausgleich aus deinen Trips. Der Wertrechner darunter ist nur eine Rechnung und zählt hier nicht mit. Flüge, die der Arbeitgeber zahlt, zählen nicht als Ausgabe; ihr Ertrag steht als „gratis“ separat.</p>
       <div class="row2">
         <div>
           <label style="margin-top:0;">Zeitraum</label>
@@ -959,7 +959,7 @@
 
     <div class="card">
       <h2>💰 Wertrechner: €/Point & €/QP</h2>
-      <p class="hint" style="margin-top:0;">Trag eine Ausgabe ein — berechnet Kosten pro Point und pro Qualifying Point, sortiert nach bestem Wert. Der Eintrag fließt in die Auswertung oben ein.</p>
+      <p class="hint" style="margin-top:0;">Zum Durchrechnen von Angeboten (z. B. Uptrip-Kollektion, Kreditkarten-Tausch): berechnet Kosten pro Point und pro Qualifying Point, sortiert nach bestem Wert. Reine Rechnung — fließt nicht in die Ausgaben-Auswertung oben ein.</p>
       <form id="calc-form">
         <div class="row2">
           <div>
@@ -982,10 +982,6 @@
           <option value="30">Ja, ~30% Bonus</option>
           <option value="80">Ja, ~80% Bonus (Maximalpaket)</option>
         </select>
-        <div class="row2">
-          <div><label>Datum</label><input type="date" id="c-date"></div>
-          <div><label>Belegnummer</label><input type="text" id="c-receipt" autocomplete="off"></div>
-        </div>
         <label>Notiz</label>
         <input type="text" id="c-note" placeholder="z.B. Kartentausch Mai">
         <button type="submit" class="btn secondary">Berechnen & speichern</button>

@@ -1474,8 +1474,7 @@ function renderCalc() {
       <div>
         <div class="route">${c.type} ${c.idx === bestIdx ? '🏆' : ''}</div>
         <div class="meta">${c.cost.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})} € · ${c.totalPoints} P · ${c.totalQp} QP${c.co2 > 0 ? ' (inkl. CO₂ +' + c.co2 + '%)' : ''}</div>
-        ${c.receiptNo ? `<div class="meta">🧾 Beleg ${escHtml(c.receiptNo)}</div>` : ''}
-        ${c.note ? `<div class="meta">📝 ${c.note}</div>` : ''}
+        ${c.note ? `<div class="meta">📝 ${escHtml(c.note)}</div>` : ''}
       </div>
       <div class="pts">
         <div class="p">${c.perQP !== null ? c.perQP.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/QP' : '–'}</div>
@@ -2691,13 +2690,10 @@ document.getElementById('calc-form').addEventListener('submit', async (e) => {
     points: parseInt(document.getElementById('c-points').value) || 0,
     qp: parseInt(document.getElementById('c-qp').value) || 0,
     co2: parseInt(document.getElementById('c-co2').value) || 0,
-    note: document.getElementById('c-note').value,
-    date: document.getElementById('c-date').value || new Date().toISOString().slice(0, 10),
-    receiptNo: document.getElementById('c-receipt').value.trim()
+    note: document.getElementById('c-note').value
   });
   await saveValueLog();
   e.target.reset();
-  document.getElementById('c-date').value = new Date().toISOString().slice(0, 10);
   render();
 });
 
