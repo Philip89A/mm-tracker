@@ -33,6 +33,14 @@ const LIVERIES = {
   'YR-BGG': [{ name: 'Retro (55 Jahre TAROM) / „Happy 60 Years“', from: '2009-01-01', temp: true, src: 'Retro-Lackierung 2009, später „Happy 60 Years“; ob noch aktuell, ist nicht belegt' }]
 };
 
+// Oberbegriff für Filter: alle Star-Alliance- bzw. 100-Jahre-Varianten zusammenfassen
+function liveryGroup(name) {
+  const n = String(name || '');
+  if (/star\s*alliance/i.test(n)) return 'Star Alliance';
+  if (/100\s*(jahre|years)/i.test(n)) return 'Lufthansa 100 Jahre';
+  return n;
+}
+
 // Lackierung eines Flugs: manueller Eintrag am Flug geht vor, sonst der passende Eintrag oben.
 // status: 'manual' | 'yes' (zum Flugdatum belegt) | 'likely' (aktuell so, Beginn unbekannt) |
 //         'unclear' (befristet, Ende unbekannt) | 'other' (nur zu einer anderen Zeit)

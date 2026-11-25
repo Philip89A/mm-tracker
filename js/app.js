@@ -862,13 +862,24 @@ function populateTripFilters() {
   fill('tf-aircraft', '<option value="">Alle</option>' + types.map(a => opt(a)).join(''));
   const regs = [...new Set(legs.map(f => (f.registration || '').trim().toUpperCase()).filter(Boolean))].sort();
   fill('tf-reg', '<option value="">Alle</option>' + regs.map(a => opt(a)).join(''));
+  const groups = new Map();
+  trips.forEach(t => tripFlightInfos(t).forEach(f => { const g = legLiveryGroup(f, t); if (g) groups.set(g, (groups.get(g) || 0) + 1); }));
+  fill('tf-livery', '<option value="">Alle</option>' + (groups.size ? opt('__any', 'Alle Sonderlackierungen') : '') +
+    [...groups.keys()].sort((a, b) => a.localeCompare(b, 'de')).map(g => opt(g, `${g} (${groups.get(g)})`)).join('') + opt('__none', 'ohne Sonderlackierung'));
+}
+
+// Sonderlackierung einer Teilstrecke als Filter-Oberbegriff; nur wenn zum Flugdatum belegt oder von dir eingetragen
+function legLiveryGroup(f, t) {
+  if (typeof liveryFor !== 'function') return '';
+  const lv = liveryFor(f.registration, f.date || t.date, f.livery);
+  return lv && ['yes', 'likely', 'manual'].includes(lv.status) ? liveryGroup(lv.name) : '';
 }
 
 function readTripFilters() {
   const v = (id) => document.getElementById(id).value;
   return {
     year: v('tf-year'), status: v('tf-status'), airline: v('tf-airline'), airport: v('tf-airport'), country: v('tf-country'),
-    cls: v('tf-class'), aircraft: v('tf-aircraft'), reg: v('tf-reg'), seatKind: v('tf-seatkind'),
+    cls: v('tf-class'), aircraft: v('tf-aircraft'), reg: v('tf-reg'), seatKind: v('tf-seatkind'), livery: v('tf-livery'),
     q: v('tf-search').trim().toUpperCase().replace(/\s+/g, '')
   };
 }
@@ -895,10 +906,16 @@ function legMatchesFilters(f, t, F) {
     const k = seatKind(f);
     if (F.seatKind === 'unknown' ? k !== null : k !== F.seatKind) return false;
   }
-  if (F.q && ![f.flightNo, f.registration, f.seat].some(x => String(x || '').toUpperCase().replace(/\s+/g, '').includes(F.q))) return false;
+  if (F.livery) {
+    const g = legLiveryGroup(f, t);
+    // „ohne“: nur Flüge, bei denen sicher keine Sonderlackierung bekannt ist (unklare Fälle fallen raus)
+    const unclear = !g && typeof liveryFor === 'function' && (liveryFor(f.registration, f.date || t.date, f.livery) || {}).status === 'unclear';
+    if (F.livery === '__any' ? !g : F.livery === '__none' ? (!!g || unclear) : g !== F.livery) return false;
+  }
+  if (F.q && ![f.flightNo, f.registration, f.seat, f.livery].some(x => String(x || '').toUpperCase().replace(/\s+/g, '').includes(F.q))) return false;
   return true;
 }
-const hasLegFilter = (F) => !!(F.aircraft || F.reg || F.cls || F.seatKind || F.q);
+const hasLegFilter = (F) => !!(F.aircraft || F.reg || F.cls || F.seatKind || F.livery || F.q);
 
 function tripMatchesFilters(t, F, ignoreYear) {
   if (!ignoreYear && F.year && !(t.date || '').startsWith(F.year)) return false;
@@ -909,7 +926,7 @@ function tripMatchesFilters(t, F, ignoreYear) {
   if (hasLegFilter(F)) {
     // Trips ohne Flugdetails zählen nur bei reinem Klassenfilter (über die Klasse des Trips).
     const legs = tripFlightInfos(t);
-    const pool = legs.length ? legs : (F.cls && !(F.aircraft || F.reg || F.seatKind || F.q) ? [{}] : []);
+    const pool = legs.length ? legs : (F.cls && !(F.aircraft || F.reg || F.seatKind || F.livery || F.q) ? [{}] : []);
     if (!pool.some(f => legMatchesFilters(f, t, F))) return false;
   }
   return true;
@@ -927,7 +944,7 @@ function getFilteredLegs() {
 }
 
 function resetTripFilters() {
-  ['tf-year', 'tf-status', 'tf-airline', 'tf-airport', 'tf-country', 'tf-class', 'tf-aircraft', 'tf-reg', 'tf-seatkind'].forEach(id => { document.getElementById(id).value = ''; });
+  ['tf-year', 'tf-status', 'tf-airline', 'tf-airport', 'tf-country', 'tf-class', 'tf-aircraft', 'tf-reg', 'tf-seatkind', 'tf-livery'].forEach(id => { document.getElementById(id).value = ''; });
   document.getElementById('tf-search').value = '';
   refreshTripFilters();
 }
@@ -938,7 +955,7 @@ function renderTrips() {
   populateTripFilters();
   populateBookingSelect(editingTripId);
   populateUpgradeVoucherSelect();
-  const activeF = ['tf-year', 'tf-status', 'tf-airline', 'tf-airport', 'tf-country', 'tf-class', 'tf-aircraft', 'tf-reg', 'tf-seatkind', 'tf-search'].filter(id => document.getElementById(id).value).length;
+  const activeF = ['tf-year', 'tf-status', 'tf-airline', 'tf-airport', 'tf-country', 'tf-class', 'tf-aircraft', 'tf-reg', 'tf-seatkind', 'tf-livery', 'tf-search'].filter(id => document.getElementById(id).value).length;
   const badge = document.getElementById('tf-active');
   badge.textContent = activeF;
   badge.style.display = activeF ? '' : 'none';
@@ -2762,7 +2779,7 @@ function refreshTripFilters() {
   if (typeof renderRouteMap === 'function') renderRouteMap();
   if (typeof renderStats === 'function') renderStats();
 }
-['tf-year', 'tf-status', 'tf-airline', 'tf-airport', 'tf-country', 'tf-class', 'tf-aircraft', 'tf-reg', 'tf-seatkind'].forEach(id => document.getElementById(id).addEventListener('change', refreshTripFilters));
+['tf-year', 'tf-status', 'tf-airline', 'tf-airport', 'tf-country', 'tf-class', 'tf-aircraft', 'tf-reg', 'tf-seatkind', 'tf-livery'].forEach(id => document.getElementById(id).addEventListener('change', refreshTripFilters));
 document.getElementById('tf-search').addEventListener('input', refreshTripFilters);
 document.getElementById('tf-reset').addEventListener('click', resetTripFilters);
 
