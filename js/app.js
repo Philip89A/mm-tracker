@@ -2325,7 +2325,7 @@ function tripFlightInfos(t) {
 function flightInfoText(f) {
   const kind = seatKind(f);
   return [f.flightNo, (f.from && f.to) ? `${f.from}–${f.to}` : '', f.aircraft, f.registration, f.seat ? `Sitz ${f.seat}${kind ? ' (' + SEAT_KINDS[kind] + ')' : ''}` : '',
-    f.cabin ? (CABIN_LABELS[f.cabin] || f.cabin) : '', f.duration].filter(Boolean).join(' · ');
+    f.cabin ? (CABIN_LABELS[f.cabin] || f.cabin) : '', f.duration, f.miles ? '+' + Number(f.miles).toLocaleString('de-DE') + ' Meilen' : ''].filter(Boolean).join(' · ');
 }
 
 // ---------- Sitzart: Fenster / Mitte / Gang ----------
@@ -2354,14 +2354,15 @@ function seatKind(f) {
 
 const FLIGHT_ROW_FIELDS = [
   ['flightNo', 'Flugnr.', 'LH 1418'], ['from', 'Von', 'FRA'], ['to', 'Nach', 'OTP'], ['duration', 'Dauer', '2h 16m'],
-  ['aircraft', 'Flugzeugtyp', 'A320'], ['registration', 'Kennzeichen', 'D-AIWA'], ['seat', 'Sitz', '15A'], ['date', 'Datum', '']
+  ['aircraft', 'Flugzeugtyp', 'A320'], ['registration', 'Kennzeichen', 'D-AIWA'], ['seat', 'Sitz', '15A'], ['date', 'Datum', ''],
+  ['miles', 'Meilen (laut Konto)', '668']
 ];
 
 function addFlightRow(data = {}) {
   const row = document.createElement('div');
   row.className = 'flight-row';
   row.innerHTML = `<div class="flight-row-grid">${FLIGHT_ROW_FIELDS.map(([k, label, ph]) =>
-      `<div><label>${label}</label><input type="${k === 'date' ? 'date' : 'text'}" data-f="${k}" placeholder="${ph}" autocomplete="off" value="${escHtml(data[k] || '')}"></div>`).join('')}
+      `<div><label>${label}</label><input type="${k === 'date' ? 'date' : 'text'}"${k === 'miles' ? ' inputmode="numeric"' : ''} data-f="${k}" placeholder="${ph}" autocomplete="off" value="${escHtml(data[k] || '')}"></div>`).join('')}
       <div><label>Kabine</label><select data-f="cabin"><option value="">–</option>${Object.entries(CABIN_LABELS).map(([k, v]) => `<option value="${k}"${data.cabin === k ? ' selected' : ''}>${v}</option>`).join('')}</select></div>
     </div><button type="button" class="btn secondary flight-row-del">Teilstrecke entfernen</button>`;
   row.querySelector('.flight-row-del').addEventListener('click', () => row.remove());
@@ -2384,6 +2385,8 @@ function readFlightRows() {
     f.flightNo = f.flightNo.replace(/\s+/g, '').toUpperCase();
     f.aircraft = f.aircraft.toUpperCase();
     f.seat = f.seat.toUpperCase();
+    const mi = parseInt(String(f.miles || '').replace(/\D/g, ''));
+    if (mi > 0) f.miles = mi; else delete f.miles;
     return f;
   }).filter(f => Object.values(f).some(Boolean));
 }
@@ -2433,7 +2436,8 @@ window.startEditTrip = function(idx) {
   tripReceiptFiles = (t.receiptFiles || []).map(f => ({ ...f })); tripSessionUploads = []; tripFilesToDelete = [];
   if (typeof renderReceiptFiles === 'function') renderReceiptFiles();
   document.getElementById('t-receipts-details').open = !!(t.receiptNo || t.upgradeReceiptNo || t.co2ReceiptNo || tripReceiptFiles.length);
-  const linkedMiles = milesLog.filter(mv => mv.sourceTripId === t.id);
+  // Trip-Felder zeigen nur die Meilen ohne Teilstrecken-Zuordnung; die je Teilstrecke stehen in den Flugdetails
+  const linkedMiles = milesLog.filter(mv => mv.sourceTripId === t.id && !mv.sourceLeg);
   document.getElementById('t-miles').value = (linkedMiles.find(mv => mv.category === 'Flüge') || {}).amount || '';
   document.getElementById('t-exec-miles').value = (linkedMiles.find(mv => mv.category === 'Executive Meilen') || {}).amount || '';
   document.getElementById('t-co2-miles').value = (linkedMiles.find(mv => mv.category === 'CO2-Kompensation') || {}).amount || '';
@@ -2590,6 +2594,17 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
       });
       milesChanged = true;
     }
+  });
+  // Meilen je Teilstrecke (so bucht Miles & More: jedes Segment einzeln) — eigene Bewegung je Flug
+  (trip.flightInfo || []).forEach(f => {
+    const amount = parseInt(f.miles) || 0;
+    if (amount <= 0) return;
+    milesLog.push({
+      id: genId(), date: f.date || trip.date, category: 'Flüge', source: '', amount,
+      note: `Automatisch aus Trip ${trip.route} · ${[f.flightNo, f.from && f.to ? f.from + '→' + f.to : ''].filter(Boolean).join(' ')}`,
+      sourceTripId: tripId, sourceLeg: f.flightNo || `${f.from}-${f.to}`
+    });
+    milesChanged = true;
   });
   if (milesChanged) await saveMilesLog();
 

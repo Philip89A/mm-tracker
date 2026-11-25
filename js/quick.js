@@ -13,7 +13,7 @@
     ['duration', 'Dauer', '2h 15m'], ['aircraft', 'Flugzeug', 'A320'], ['registration', 'Kennzeichen', 'D-AIWA'], ['airline', 'Airline', 'Lufthansa']];
 
   const today = () => new Date().toISOString().slice(0, 10);
-  const blank = (date) => ({ date: date || today(), flightNo: '', from: '', to: '', dep: '', arr: '', duration: '', aircraft: '', registration: '', airline: '', cls: 'economy', seat: '', src: '' });
+  const blank = (date) => ({ date: date || today(), flightNo: '', from: '', to: '', dep: '', arr: '', duration: '', aircraft: '', registration: '', airline: '', cls: 'economy', seat: '', miles: '', src: '' });
   let legs = [blank()];
 
   const place = (c) => (AIRPORTS[c] ? `${AIRPORTS[c][2]}, ${countryLabel(AIRPORTS[c][3])}` : '');
@@ -33,6 +33,7 @@
       <div class="flight-row-grid">
         <div><label>Klasse</label><select data-k="cls">${[['economy', 'Economy'], ['premium', 'Premium Economy'], ['business', 'Business'], ['first', 'First']].map(([k, v]) => `<option value="${k}"${l.cls === k ? ' selected' : ''}>${v}</option>`).join('')}</select></div>
         <div><label>Sitz</label><input type="text" data-k="seat" placeholder="15A" autocomplete="off" value="${esc(l.seat)}"></div>
+        <div><label>Meilen (laut Konto, optional)</label><input type="text" inputmode="numeric" data-k="miles" placeholder="668" autocomplete="off" value="${esc(l.miles || '')}"></div>
       </div>
     </div>`).join('');
   }
@@ -134,7 +135,7 @@
     // Klasse/Reichweite je Segment nur, wo sie vom ersten Segment abweichen
     rebuildSegRows(sorted.map((l, i) => ({ cls: l.cls === first.cls ? '' : l.cls, range: ranges[i] === ranges[0] ? '' : ranges[i] })));
     $('t-seg-details').open = sorted.some((l, i) => l.cls !== first.cls || ranges[i] !== ranges[0]);
-    loadFlightRows(sorted.map(l => ({ flightNo: l.flightNo, from: l.from, to: l.to, date: l.date, duration: l.duration, aircraft: l.aircraft, registration: l.registration, seat: l.seat, cabin: CLASS_TO_CABIN[l.cls] || '' })));
+    loadFlightRows(sorted.map(l => ({ flightNo: l.flightNo, from: l.from, to: l.to, date: l.date, duration: l.duration, aircraft: l.aircraft, registration: l.registration, seat: l.seat, miles: l.miles, cabin: CLASS_TO_CABIN[l.cls] || '' })));
     msg.textContent = 'Übernommen — unten prüfen, ggf. Kosten und Belege ergänzen und „Trip speichern“.';
     $('trip-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
