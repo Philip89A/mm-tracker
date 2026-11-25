@@ -27,6 +27,8 @@ const LIVERIES = {
   // Austrian
   'OE-LBY': [{ name: 'Star Alliance', from: null, src: 'Flightradar24 (Star Alliance Livery), von dir bestätigt (Nov. 2026)' }],
   'OE-LBX': [{ name: 'Star Alliance', from: '2012-11-01', to: '2018-12-31', src: 'JetPhotos: 11/2012–12/2018 (Austrian-Flottenseite nennt es noch, widersprüchlich)' }],
+  // Condor
+  'D-ABON': [{ name: 'Condor „Wir lieben Fliegen“', from: '2006-01-01', src: '50 Jahre Condor (2006), Name „Willi“ (airhistory.net); laut dir 2023 noch aktiv' }],
   // TAROM
   'YR-BGG': [{ name: 'Retro (55 Jahre TAROM) / „Happy 60 Years“', from: '2009-01-01', temp: true, src: 'Retro-Lackierung 2009, später „Happy 60 Years“; ob noch aktuell, ist nicht belegt' }]
 };
