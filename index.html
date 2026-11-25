@@ -118,6 +118,10 @@
         <input type="checkbox" id="calc-lever-800" style="width:auto;">
         800-QP-Meilentausch nutzen (sobald 800 QP erreicht: bis zu 20.000 Meilen → +125 P / +125 QP)
       </label>
+      <label id="calc-lever-800prev-row" style="display:none; align-items:center; gap:8px; margin-top:8px; font-weight:600; color:var(--text);">
+        <input type="checkbox" id="calc-lever-800prev" style="width:auto;">
+        <span id="calc-lever-800prev-label">800-QP-Meilentausch aus dem Vorjahr einlösen</span>
+      </label>
       <div class="subcard" style="margin-top:14px;">
         <label style="margin-top:0;">💳 Kreditkarten-Meilen-Stand (manuell, z.B. laut Kartenkonto)</label>
         <input type="number" id="cc-miles-balance" min="0" step="1" placeholder="0">
@@ -192,6 +196,7 @@
                 <option value="evoucher">eVoucher</option>
                 <option value="upgrade">Upgrade-Gutschein</option>
                 <option value="lounge">Lounge-Zutritt</option>
+                <option value="swap800">800-QP-Meilentausch</option>
                 <option value="other">Sonstiges</option>
               </select>
             </div>
@@ -863,6 +868,9 @@
         <h3 class="sim-h">Hebel &amp; Zusätze</h3>
         <label style="display:flex; align-items:center; gap:8px; margin-top:0; font-weight:600; color:var(--text);">
           <input type="checkbox" id="sim-lever800" style="width:auto;"> 800-QP-Meilentausch (ab 800 QP: bis 20.000 Meilen → +125 P / +125 QP)
+        </label>
+        <label id="sim-lever800prev-row" style="display:none; align-items:center; gap:8px; margin-top:8px; font-weight:600; color:var(--text);">
+          <input type="checkbox" id="sim-lever800prev" style="width:auto;"> <span id="sim-lever800prev-label">800-QP-Meilentausch aus dem Vorjahr einlösen</span>
         </label>
         <label>Kreditkarten-Meilen-Tausch (5.000er-Schritte, 250 Meilen = 1 P + 1 QP)</label>
         <input type="range" id="sim-cc" min="0" max="25000" step="5000" value="0">

@@ -87,7 +87,7 @@
 
   // ================================================================ Gutscheine
 
-  const VOUCHER_TYPES = { evoucher: '🎫 eVoucher', upgrade: '⬆️ Upgrade-Gutschein', lounge: '🛋️ Lounge-Zutritt', other: '🎟️ Sonstiges' };
+  const VOUCHER_TYPES = { evoucher: '🎫 eVoucher', upgrade: '⬆️ Upgrade-Gutschein', lounge: '🛋️ Lounge-Zutritt', swap800: '🔄 800-QP-Meilentausch', other: '🎟️ Sonstiges' };
   let editingVoucherId = null;
   let showUsedVouchers = false;
 
@@ -111,8 +111,13 @@
     const sy = seasonYear();
     const reached700 = goalAchievedTotals().q >= 700;
     const haveEvoucher = vouchers.some(v => v.type === 'evoucher' && (v.createdAt || '').startsWith(sy));
-    hint.style.display = reached700 && !haveEvoucher ? 'block' : 'none';
-    hint.textContent = `🎯 700 QP in ${sy} erreicht — falls dein eVoucher bereits freigeschaltet ist, trag ihn hier mit Ablaufdatum ein.`;
+    // 800 QP: Der Meilentausch ist ein Anspruch mit Ablaufdatum (meist bis ins Folgejahr) — als Gutschein führen
+    const needSwapVoucher = swapEntitled(sy) && !swapVoucher(sy) && !leverSwapUsed(sy);
+    const hints = [];
+    if (reached700 && !haveEvoucher) hints.push(`🎯 700 QP in ${sy} erreicht — falls dein eVoucher bereits freigeschaltet ist, trag ihn hier mit Ablaufdatum ein.`);
+    if (needSwapVoucher) hints.push(`🔄 800 QP in ${sy} erreicht — trag den Meilentausch als Gutschein „800-QP-Meilentausch“ mit Ablaufdatum aus deinem Konto ein. Einlösen kannst du ihn noch im Folgejahr; die +125 P/QP zählen in dem Jahr, in dem du ihn einlöst (Buchung unter Prognose → Genutzte Hebel).`);
+    hint.style.display = hints.length ? 'block' : 'none';
+    hint.innerHTML = hints.map(esc).join('<br>');
 
     const card = v => {
       const call = `'${v.id}'`;
@@ -151,6 +156,17 @@
   window.toggleUsedVouchers = function() { showUsedVouchers = !showUsedVouchers; renderVouchers(); };
   window.markVoucherUsed = async function(id) {
     const v = vouchers.find(x => x.id === id); if (!v) return;
+    // Der Meilentausch zählt erst als Hebel (+125 P/QP, Meilen-Abgang) — dorthin weiterleiten
+    if (v.type === 'swap800') {
+      if (!confirm('Den 800-QP-Meilentausch als Hebel buchen? Dann zählen die +125 P/QP im Jahr der Einlösung, die Meilen werden abgebucht und der Gutschein wird automatisch als eingelöst markiert.')) return;
+      document.querySelector('[data-tab="tab-dashboard"]').click();
+      document.getElementById('lv-type').value = 'swap800';
+      document.getElementById('lv-type').dispatchEvent(new Event('change'));
+      document.getElementById('lv-date').value = today();
+      const det = document.getElementById('lever-form').closest('details'); if (det) det.open = true;
+      document.getElementById('lever-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     v.used = true; v.usedDate = today();
     await saveVouchers(); render();
   };
@@ -208,6 +224,8 @@
     { id: 'recon_q3', m: [9, 9], title: 'Kontoabgleich zum Quartalsende (Q3)', auto: y => reconciledIn(y, 9) },
     { id: 'promos', m: [9, 10], title: 'Jahresend-Aktionen recherchieren', hint: 'Mehr → Aktions-Vorlagen aktualisieren; Boosts für Points/QP gibt es oft im Herbst.' },
     { id: 'decide_run', m: [9, 10], title: 'Entscheiden: Status-Run oder Status-Kauf, falls das Ziel knapp ist', hint: 'Prognose-Karte und Streckenplaner (Rechner-Tab).' },
+    { id: 'swap_prev', m: [1, 2], title: 'Offenen 800-QP-Meilentausch aus dem Vorjahr einlösen, bevor er verfällt', hint: 'Prognose-Karte → Genutzte Hebel; die +125 P/QP zählen fürs neue Jahr.',
+      auto: y => !swapCarryOver(String(y)) },
     { id: 'levers', m: [10, 11], title: 'Hebel einplanen und nutzen: Kreditkarten-Tausch, 800-QP-Tausch', hint: 'Karte „Genutzte Hebel“ in der Prognose.',
       auto: y => levers.some(l => (l.date || '').startsWith(String(y))) },
     { id: 'uptrip', m: [10, 12], title: 'Uptrip-Kollektionen einlösen, bevor das Jahr endet', hint: 'Tab Sammeln.' },
@@ -628,9 +646,10 @@
     const entry = { type, title, expires: document.getElementById('vo-expires').value, note: document.getElementById('vo-note').value };
     if (editingVoucherId) {
       const v = vouchers.find(x => x.id === editingVoucherId);
-      if (v) Object.assign(v, entry);
+      if (v) { Object.assign(v, entry); if (type === 'swap800' && !v.earnedYear) v.earnedYear = seasonYear(); }
     } else {
-      vouchers.push({ id: genId(), used: false, usedDate: null, createdAt: today(), ...entry });
+      // Der 800-QP-Tausch gehört zu dem Statusjahr, in dem die 800 QP erreicht wurden (Saison im Dashboard)
+      vouchers.push({ id: genId(), used: false, usedDate: null, createdAt: today(), ...entry, ...(type === 'swap800' ? { earnedYear: seasonYear() } : {}) });
     }
     await saveVouchers();
     cancelEditVoucher();

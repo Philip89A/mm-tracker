@@ -107,6 +107,7 @@ let calcRange = 'continental';
 let calcClass = 'economy';
 let calcCo2 = 80;
 let calcLever800 = false;
+let calcLever800Prev = false; // offener 800-QP-Tausch aus dem Vorjahr, in dieser Saison eingelöst
 let calcCcMiles = 0;
 
 // Der Kreditkarten-Meilentausch geht nur in 5.000er-Schritten, gedeckelt auf
@@ -121,9 +122,30 @@ function maxRedeemableCcMiles(balance, usedThisYear = 0) {
 function leverUsedCcMiles(year) {
   return levers.filter(l => l.type === 'cc' && (l.date || '').startsWith(year)).reduce((s, l) => s + (l.miles || 0), 0);
 }
+// 800-QP-Meilentausch: Der Anspruch entsteht einmal im Jahr, in dem 800 QP erreicht werden, und ist
+// laut Konto bis ins Folgejahr einlösbar (z.B. bis 24.02.). Die Points/QP zählen in dem Jahr, in dem
+// eingelöst wird — so kann man den Anspruch aus 2026 Anfang 2027 für das neue Statusjahr nutzen.
+// l.entitlementYear = Jahr des Anspruchs (ältere Einträge ohne Feld: Jahr der Einlösung).
 function leverSwapUsed(year) {
-  return levers.some(l => l.type === 'swap800' && (l.date || '').startsWith(year));
+  return levers.some(l => l.type === 'swap800' && String(l.entitlementYear || (l.date || '').slice(0, 4)) === String(year));
 }
+function swapVoucher(year) {
+  return vouchers.find(v => v.type === 'swap800' && String(v.earnedYear) === String(year));
+}
+// Anspruch für `year`: 800 QP laut App, laut Jahres-Archiv oder als Gutschein eingetragen
+function swapEntitled(year) {
+  const y = String(year);
+  return computeAchievedTotals(y).q >= 800 || yearArchive.some(a => String(a.year) === y && (a.qp || 0) >= 800) || !!swapVoucher(y);
+}
+// Noch offener Anspruch aus dem Vorjahr, der in der Saison `year` eingelöst werden kann
+function swapCarryOver(year) {
+  const prev = String(Number(year) - 1);
+  if (!swapEntitled(prev) || leverSwapUsed(prev)) return null;
+  const v = swapVoucher(prev), expires = v && v.expires ? v.expires : null;
+  if (expires && expires < new Date().toISOString().slice(0, 10)) return null;
+  return { year: prev, expires };
+}
+const fmtDateDe = (d) => (d ? d.split('-').reverse().join('.') : '');
 
 // Leiter der Jahresziele: Frequent Traveller -> 700 QP -> 800 QP -> Senator
 // (in dieser Reihenfolge, da FT mit 325 QP niedriger liegt als die beiden
@@ -220,16 +242,32 @@ function tripPoints(t) {
 //  co2     = CO₂-Bonus auf die tatsächlich geflogene Klasse je Segment
 // Beispiel OTP–VIE–FRA, kontinental, CO₂ 80 %, OTP→VIE auf Business hochgestuft:
 //  gebucht 20 + 20 = 40, Upgrade +20, CO₂ 80 % auf 40 (Business) + 80 % auf 20 (Economy) = +48 → 108.
+// Miles & More rechnet jedes Segment einzeln ab, auch bei Umsteigeverbindungen — deshalb wird
+// je Segment gerechnet und gerundet und erst dann summiert (segs = Aufteilung je Segment).
 function tripPointParts(t) {
-  let booked = 0, flown = 0;
-  tripSegments(t).forEach(g => {
+  const pct = (t.co2 || 0) / 100;
+  const segs = tripSegments(t).map(g => {
     const bookedCls = t.upgradeFrom && t.upgradeFrom !== g.cls ? t.upgradeFrom : g.cls;
-    booked += pointsForSegment(g.range, bookedCls);
-    flown += pointsForSegment(g.range, g.cls);
+    const booked = pointsForSegment(g.range, bookedCls), flown = pointsForSegment(g.range, g.cls);
+    const upgrade = Math.max(0, flown - booked), co2 = Math.round(flown * pct);
+    return { cls: g.cls, range: g.range, booked, upgrade, co2, total: booked + upgrade + co2 };
   });
-  const upgrade = Math.max(0, flown - booked);
-  const co2 = Math.round(flown * ((t.co2 || 0) / 100));
-  return { booked, upgrade, co2, total: booked + upgrade + co2 };
+  const sum = (k) => segs.reduce((s, g) => s + g[k], 0);
+  return { booked: sum('booked'), upgrade: sum('upgrade'), co2: sum('co2'), total: sum('total'), segs };
+}
+
+// Trip-Log: Points je Segment, wie sie auf dem Miles-&-More-Konto einzeln erscheinen
+function segmentPointsLine(t) {
+  if (t.noPoints || t.pointsOverride > 0) return '';
+  const parts = tripPointParts(t);
+  if (parts.segs.length < 2) return '';
+  const codes = parseRoute(t.route).known, infos = tripFlightInfos(t);
+  const named = codes.length - 1 === parts.segs.length;
+  return parts.segs.map((g, i) => {
+    const f = infos[i] || {};
+    const name = f.flightNo ? `${f.flightNo}${f.from && f.to ? ' ' + f.from + '→' + f.to : ''}` : (named ? `${codes[i]}→${codes[i + 1]}` : `Segment ${i + 1}`);
+    return `${escHtml(name)} ${labelClass(g.cls)}: +${g.total}${g.co2 ? ` (${g.booked + g.upgrade} + ${g.co2} CO₂)` : ''}`;
+  }).join(' · ');
 }
 
 // Klasse und Reichweite je Segment. Normalerweise gilt für alle Segmente dieselbe Klasse (t.cls);
@@ -974,6 +1012,7 @@ function renderTrips() {
           ${t.planned ? `<div class="meta"><span class="tag ok">📅 Geplant</span></div>` : ''}
           ${t.noPoints ? `<div class="meta"><span class="tag mid">ℹ️ nur Flugdaten — keine Punkte berechnet</span></div>` : ''}
           ${tripFlightInfos(t).map(f => `<div class="meta">✈️ ${escHtml(flightInfoText(f))}</div>`).join('')}
+          ${segmentPointsLine(t) ? `<div class="meta">🧮 Je Segment: ${segmentPointsLine(t)}</div>` : ''}
           ${tripUpgradeDeltaQP(t) > 0 ? `<div class="meta">⬆️ Upgrade von ${labelClass(t.upgradeFrom)}${t.upgradeCost > 0 ? ': ' + t.upgradeCost.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' € für +' + tripUpgradeDeltaQP(t) + ' QP (' + (t.upgradeCost / tripUpgradeDeltaQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/QP)' : ''}</div>` : ''}
           ${t.co2Cost > 0 ? `<div class="meta">🌱 CO₂-Ausgleich: ${co2LineText(t)}</div>` : ''}
           ${t.bookingId ? `<div class="meta">🔗 zusammen gebucht mit ${escHtml(trips.filter(x => x.id !== t.id && x.bookingId === t.bookingId).map(x => (x.date || '') + ' ' + x.route).join(', '))}</div>` : ''}
@@ -1066,20 +1105,35 @@ function renderLevers() {
   document.getElementById('levers-year').textContent = sy;
   const mine = levers.filter(l => (l.date || '').startsWith(sy)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   listEl.innerHTML = mine.length ? mine.map(l => `<div class="flex-between" style="margin-top:6px; font-size:13px;">
-      <span>${l.type === 'cc' ? '💳 Kreditkarten-Tausch' : '🔄 800-QP-Meilentausch'} · ${l.date} · ${(l.miles || 0).toLocaleString('de-DE')} Meilen → <b>+${l.points} P / +${l.qp} QP</b></span>
+      <span>${l.type === 'cc' ? '💳 Kreditkarten-Tausch' : '🔄 800-QP-Meilentausch'}${l.entitlementYear && l.entitlementYear !== (l.date || '').slice(0, 4) ? ` (Anspruch aus ${l.entitlementYear})` : ''} · ${l.date} · ${(l.miles || 0).toLocaleString('de-DE')} Meilen → <b>+${l.points} P / +${l.qp} QP</b></span>
       <button class="del" onclick="deleteLever('${l.id}')">entfernen</button>
     </div>`).join('') : '<div class="meta-line" style="margin-top:4px; color:var(--muted); font-size:12px;">Noch kein Hebel in dieser Saison genutzt.</div>';
   const usedCc = leverUsedCcMiles(sy), ach = computeAchievedTotals(sy);
-  const swapText = leverSwapUsed(sy) ? 'genutzt ✅' : (ach.q >= 800 ? 'freigeschaltet, noch offen' : `noch nicht freigeschaltet (${ach.q} von 800 QP)`);
-  document.getElementById('levers-quota').textContent = `Kreditkarten-Tausch: ${usedCc.toLocaleString('de-DE')} von 25.000 Meilen genutzt (${(25000 - usedCc).toLocaleString('de-DE')} frei) · 800-QP-Tausch: ${swapText}`;
+  const ownV = swapVoucher(sy);
+  const swapText = leverSwapUsed(sy) ? 'genutzt ✅' : (swapEntitled(sy)
+    ? `freigeschaltet, noch offen${ownV && ownV.expires ? ` — einlösbar bis ${fmtDateDe(ownV.expires)}; Points zählen im Jahr der Einlösung` : ' — Ablaufdatum als Gutschein eintragen'}`
+    : `noch nicht freigeschaltet (${ach.q} von 800 QP)`);
+  const carry = swapCarryOver(sy);
+  const carryText = carry ? ` · Aus ${carry.year} noch offen${carry.expires ? ` bis ${fmtDateDe(carry.expires)}` : ''} — zählt für ${sy}, wenn in ${sy} eingelöst` : '';
+  document.getElementById('levers-quota').textContent = `Kreditkarten-Tausch: ${usedCc.toLocaleString('de-DE')} von 25.000 Meilen genutzt (${(25000 - usedCc).toLocaleString('de-DE')} frei) · 800-QP-Tausch ${sy}: ${swapText}${carryText}`;
   const sw = document.getElementById('calc-lever-800');
   if (sw) { sw.disabled = leverSwapUsed(sy); if (sw.disabled) { sw.checked = false; calcLever800 = false; } }
+  const swPrev = document.getElementById('calc-lever-800prev');
+  if (swPrev) {
+    document.getElementById('calc-lever-800prev-row').style.display = carry ? 'flex' : 'none';
+    if (carry) document.getElementById('calc-lever-800prev-label').textContent = `800-QP-Meilentausch aus ${carry.year} in ${sy} einlösen (+125 P / +125 QP${carry.expires ? `, bis ${fmtDateDe(carry.expires)}` : ''})`;
+    else { swPrev.checked = false; calcLever800Prev = false; }
+  }
 }
 
 window.deleteLever = async function(id) {
   if (!confirm('Diesen Hebel entfernen? Die dazugehörige Meilen-Buchung wird ebenfalls gelöscht und die Points/QP wieder abgezogen.')) return;
+  const lv = levers.find(l => l.id === id);
   levers = levers.filter(l => l.id !== id);
   milesLog = milesLog.filter(mv => mv.sourceLeverId !== id);
+  // Ein über den Tausch eingelöster Gutschein ist dann wieder offen
+  const v = lv && lv.type === 'swap800' && lv.entitlementYear ? swapVoucher(lv.entitlementYear) : null;
+  if (v && v.used && v.usedDate === lv.date) { v.used = false; v.usedDate = null; await saveVouchers(); }
   await saveLevers(); await saveMilesLog();
   render();
 };
@@ -1099,11 +1153,23 @@ document.getElementById('lever-form').addEventListener('submit', async (e) => {
     if (miles > free) { msg.textContent = `Für ${year} sind nur noch ${free.toLocaleString('de-DE')} Meilen frei (Deckel 25.000/Jahr).`; return; }
     entry = { type, date, miles, points: miles / 250, qp: miles / 250 };
   } else {
-    if (leverSwapUsed(year)) { msg.textContent = `Der 800-QP-Meilentausch ist für ${year} schon eingetragen.`; return; }
-    const q = computeAchievedTotals(year).q;
-    if (q < 800) { msg.textContent = `Für ${year} sind erst ${q} QP erzielt — der Tausch wird ab 800 QP freigeschaltet.`; return; }
     if (miles > 20000) { msg.textContent = 'Es können höchstens 20.000 Meilen getauscht werden.'; return; }
-    entry = { type, date, miles, points: 125, qp: 125 };
+    // Erst den Anspruch aus dem Vorjahr nutzen (läuft früher ab), sonst den des Einlösejahres.
+    const carry = swapCarryOver(year);
+    const carryOk = carry && (!carry.expires || date <= carry.expires);
+    const ownOk = swapEntitled(year) && !leverSwapUsed(year);
+    if (!carryOk && !ownOk) {
+      const q = computeAchievedTotals(year).q;
+      msg.textContent = carry && !carryOk ? `Der Tausch aus ${carry.year} war nur bis ${fmtDateDe(carry.expires)} einlösbar.`
+        : leverSwapUsed(year) ? `Der 800-QP-Meilentausch aus ${year} ist schon eingetragen.`
+        : `Für ${year} sind erst ${q} QP erzielt und aus ${Number(year) - 1} ist kein offener Tausch vorhanden — der Tausch wird ab 800 QP freigeschaltet.`;
+      return;
+    }
+    const ent = carryOk ? carry.year : year;
+    const v = swapVoucher(ent);
+    if (v && v.expires && date > v.expires) { msg.textContent = `Der Tausch aus ${ent} war nur bis ${fmtDateDe(v.expires)} einlösbar.`; return; }
+    entry = { type, date, miles, points: 125, qp: 125, entitlementYear: ent };
+    if (v && !v.used) { v.used = true; v.usedDate = date; await saveVouchers(); }
   }
   entry.id = genId();
   levers.push(entry);
@@ -1172,6 +1238,9 @@ function renderFlightsNeeded() {
     // selbst schon 800 QP, die der Kreditkarten-Tausch mit herstellen kann).
     let p = projected.p + ccPQ;
     let q = projected.q + ccPQ;
+    // Ein offener Tausch aus dem Vorjahr braucht in dieser Saison keine 800 QP.
+    const carry = calcLever800Prev ? swapCarryOver(seasonYear()) : null;
+    if (carry) { p += 125; q += 125; }
     const lever800Eligible = q >= 800;
     if (calcLever800 && !swapUsed && lever800Eligible) { p += 125; q += 125; }
 
@@ -1194,6 +1263,7 @@ function renderFlightsNeeded() {
 
     const leverNotes = [];
     if (ccPQ > 0) leverNotes.push(`+${ccPQ} P/QP Kreditkarten-Tausch`);
+    if (carry) leverNotes.push(`+125 P/QP 800-QP-Tausch aus ${carry.year}`);
     if (calcLever800) leverNotes.push(swapUsed ? '800-QP-Meilentausch: in dieser Saison bereits genutzt (steckt schon im Stand)' : lever800Eligible ? '+125 P/QP 800-QP-Meilentausch' : '800-QP-Meilentausch: noch nicht freigeschaltet (<800 QP)');
 
     return `<div class="miles-cat-row">
@@ -2648,6 +2718,7 @@ document.getElementById('calc-range').addEventListener('change', (e) => { calcRa
 document.getElementById('calc-class').addEventListener('change', (e) => { calcClass = e.target.value; renderFlightsNeeded(); });
 document.getElementById('calc-co2').addEventListener('change', (e) => { calcCo2 = parseInt(e.target.value) || 0; renderFlightsNeeded(); });
 document.getElementById('calc-lever-800').addEventListener('change', (e) => { calcLever800 = e.target.checked; renderFlightsNeeded(); });
+document.getElementById('calc-lever-800prev').addEventListener('change', (e) => { calcLever800Prev = e.target.checked; renderFlightsNeeded(); });
 document.getElementById('calc-cc-miles').addEventListener('input', (e) => { calcCcMiles = parseInt(e.target.value) || 0; renderFlightsNeeded(); });
 
 let editingMilesId = null;

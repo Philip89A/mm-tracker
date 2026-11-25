@@ -71,15 +71,18 @@
     const cc = Math.floor(ccMiles / 250);
     const up = uptripEffect();
     let p = base.p + fl.p + extra.p + up.p + cc, q = base.q + fl.q + extra.q + up.q + cc;
-    // Der 800-QP-Tausch braucht schon 800 QP — diese darf der Kreditkarten-Tausch mit herstellen.
+    // Offener Tausch aus dem Vorjahr: zählt in dieser Saison, braucht hier keine 800 QP.
+    const carry = $('sim-lever800prev').checked ? swapCarryOver(year) : null;
+    if (carry) { p += 125; q += 125; }
+    // Der eigene 800-QP-Tausch braucht schon 800 QP — diese darf der Kreditkarten-Tausch mit herstellen.
     const swapWanted = $('sim-lever800').checked;
     const swapUsed = leverSwapUsed(year);
     const swapOk = swapWanted && !swapUsed && q >= 800;
     if (swapOk) { p += 125; q += 125; }
-    // Meilen-Pool: Uptrip-Prämien kommen dazu, getauschte Meilen gehen ab (beim 800-QP-Tausch maximal 20.000).
-    const swapMiles = swapOk ? 20000 : 0;
+    // Meilen-Pool: Uptrip-Prämien kommen dazu, getauschte Meilen gehen ab (je 800-QP-Tausch maximal 20.000).
+    const swapMiles = (swapOk ? 20000 : 0) + (carry ? 20000 : 0);
     const miles = { base: ach.m, up: up.m, out: ccMiles + swapMiles, total: ach.m + up.m - ccMiles - swapMiles };
-    return { year, base, fl, extra, up, cc, ccMiles, swapWanted, swapUsed, swapOk, miles, total: { p, q } };
+    return { year, base, fl, extra, up, cc, ccMiles, swapWanted, swapUsed, swapOk, carry, miles, total: { p, q } };
   }
 
   // ---------- Darstellung ----------
@@ -196,6 +199,7 @@
     if (r.miles.out) parts.push(`Meilen-Abgang durch Tausch: −${fmt(r.miles.out)}`);
     if (r.cc) parts.push(`Kreditkarten-Tausch (${fmt(r.ccMiles)} Meilen): +${fmt(r.cc)} P / +${fmt(r.cc)} QP`);
     if (r.extra.p || r.extra.q) parts.push(`Zusätze: +${fmt(r.extra.p)} P / +${fmt(r.extra.q)} QP`);
+    if (r.carry) parts.push(`800-QP-Tausch aus ${r.carry.year}: +125 P / +125 QP (zählt für ${r.year})`);
     if (r.swapWanted) parts.push(r.swapUsed ? '800-QP-Tausch: in dieser Saison schon genutzt (steckt im Stand)' : r.swapOk ? '800-QP-Tausch: +125 P / +125 QP' : `800-QP-Tausch: im Szenario erst ${fmt(r.total.q)} QP — erst ab 800 QP möglich`);
     if (parts.length) html += `<div class="hint" style="margin:8px 0 0;">${parts.join('<br>')}</div>`;
 
@@ -228,6 +232,10 @@
     const sw = $('sim-lever800');
     sw.disabled = leverSwapUsed(year);
     if (sw.disabled) sw.checked = false;
+    const carry = swapCarryOver(year);
+    $('sim-lever800prev-row').style.display = carry ? 'flex' : 'none';
+    if (carry) $('sim-lever800prev-label').textContent = `800-QP-Meilentausch aus ${carry.year} in ${year} einlösen (+125 P / +125 QP${carry.expires ? `, bis ${fmtDateDe(carry.expires)}` : ''})`;
+    else $('sim-lever800prev').checked = false;
   }
 
   function renderSavedScenarios() {
@@ -276,7 +284,7 @@
   });
   window.simRemoveFlight = (id) => { flights = flights.filter(f => f.id !== id); renderSim(); };
 
-  ['sim-planned', 'sim-lever800', 'sim-extra-p', 'sim-extra-q'].forEach(id => $(id).addEventListener('input', renderSim));
+  ['sim-planned', 'sim-lever800', 'sim-lever800prev', 'sim-extra-p', 'sim-extra-q'].forEach(id => $(id).addEventListener('input', renderSim));
   $('sim-cc').addEventListener('input', renderSim);
 
   $('sim-adopt-btn').addEventListener('click', async () => {
