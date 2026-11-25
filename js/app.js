@@ -243,6 +243,8 @@ function tripPoints(t) {
 // Beispiel OTP–VIE–FRA, kontinental, CO₂ 80 %, OTP→VIE auf Business hochgestuft:
 //  gebucht 20 + 20 = 40, Upgrade +20, CO₂ 80 % auf 40 (Business) + 80 % auf 20 (Economy) = +48 → 108.
 const CLASS_RANK = { economy: 0, premium: 1, business: 2, first: 3 };
+// Upgrade-Arten, die keine Zusatzpunkte bringen (Wertung nach gebuchter Klasse)
+const UPGRADE_NO_POINTS = { evoucher: 'per eVoucher', free: 'kostenlos von der Airline' };
 
 // Miles & More rechnet jedes Segment einzeln ab, auch bei Umsteigeverbindungen — deshalb wird
 // je Segment gerechnet und gerundet und erst dann summiert (segs = Aufteilung je Segment).
@@ -252,7 +254,10 @@ function tripPointParts(t) {
     // „Upgrade von“ zählt nur, wenn die gebuchte Klasse wirklich niedriger ist als die geflogene;
     // sonst (z.B. „von Business“ bei Klasse Economy) gilt die eingetragene Klasse.
     const bookedCls = t.upgradeFrom && CLASS_RANK[t.upgradeFrom] < CLASS_RANK[g.cls] ? t.upgradeFrom : g.cls;
-    const booked = pointsForSegment(g.range, bookedCls), flown = pointsForSegment(g.range, g.cls);
+    // Upgrade per eVoucher oder kostenlos von der Airline: Miles & More wertet den Flug weiter in der
+    // gebuchten Klasse (auch den CO₂-Bonus)
+    const pointsCls = UPGRADE_NO_POINTS[t.upgradeVia] ? bookedCls : g.cls;
+    const booked = pointsForSegment(g.range, bookedCls), flown = pointsForSegment(g.range, pointsCls);
     const upgrade = Math.max(0, flown - booked), co2 = Math.round(flown * pct);
     return { cls: g.cls, range: g.range, booked, upgrade, co2, total: booked + upgrade + co2 };
   });
@@ -932,6 +937,7 @@ function renderTrips() {
   document.getElementById('trip-count').textContent = trips.length;
   populateTripFilters();
   populateBookingSelect(editingTripId);
+  populateUpgradeVoucherSelect();
   const activeF = ['tf-year', 'tf-status', 'tf-airline', 'tf-airport', 'tf-country', 'tf-class', 'tf-aircraft', 'tf-reg', 'tf-seatkind', 'tf-search'].filter(id => document.getElementById(id).value).length;
   const badge = document.getElementById('tf-active');
   badge.textContent = activeF;
@@ -1017,6 +1023,7 @@ function renderTrips() {
           ${t.noPoints ? `<div class="meta"><span class="tag mid">ℹ️ nur Flugdaten — keine Punkte berechnet</span></div>` : ''}
           ${tripFlightInfos(t).map(f => `<div class="meta">✈️ ${escHtml(flightInfoText(f))}</div>`).join('')}
           ${segmentPointsLine(t) ? `<div class="meta">🧮 Je Segment: ${segmentPointsLine(t)}</div>` : ''}
+          ${UPGRADE_NO_POINTS[t.upgradeVia] && t.upgradeFrom ? `<div class="meta">${t.upgradeVia === 'free' ? '🎁' : '🎫'} Upgrade von ${labelClass(t.upgradeFrom)} ${UPGRADE_NO_POINTS[t.upgradeVia]} — Points nach gebuchter Klasse${t.upgradeVoucherId && vouchers.find(v => v.id === t.upgradeVoucherId) ? ' (Gutschein „' + escHtml(vouchers.find(v => v.id === t.upgradeVoucherId).title) + '“)' : ''}</div>` : ''}
           ${tripUpgradeDeltaQP(t) > 0 ? `<div class="meta">⬆️ Upgrade von ${labelClass(t.upgradeFrom)}${t.upgradeCost > 0 ? ': ' + t.upgradeCost.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' € für +' + tripUpgradeDeltaQP(t) + ' QP (' + (t.upgradeCost / tripUpgradeDeltaQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/QP)' : ''}</div>` : ''}
           ${t.co2Cost > 0 ? `<div class="meta">🌱 CO₂-Ausgleich: ${co2LineText(t)}</div>` : ''}
           ${t.bookingId ? `<div class="meta">🔗 zusammen gebucht mit ${escHtml(trips.filter(x => x.id !== t.id && x.bookingId === t.bookingId).map(x => (x.date || '') + ' ' + x.route).join(', '))}</div>` : ''}
@@ -2426,6 +2433,9 @@ window.startEditTrip = function(idx) {
   document.getElementById('t-airline').value = t.airline || '';
   document.getElementById('t-upgrade-from').value = t.upgradeFrom || '';
   document.getElementById('t-upgrade-cost').value = t.upgradeCost || '';
+  document.getElementById('t-upgrade-via').value = t.upgradeVia || '';
+  populateUpgradeVoucherSelect(t.upgradeVoucherId);
+  document.getElementById('t-upgrade-voucher').value = t.upgradeVoucherId || '';
   document.getElementById('t-qpmode').value = t.qpMode || '';
   document.getElementById('t-nopoints').checked = !!t.noPoints;
   loadFlightRows(tripFlightInfos(t));
@@ -2497,6 +2507,16 @@ function pruneBookings() {
 }
 
 // Auswahl „Zusammen gebucht mit“: alle anderen Trips, neueste zuerst. Die aktuelle Auswahl bleibt erhalten.
+// Auswahl „Gutschein dafür abhaken“: offene eVoucher/Upgrade-Gutscheine plus der schon verknüpfte
+function populateUpgradeVoucherSelect(currentId) {
+  const sel = document.getElementById('t-upgrade-voucher');
+  if (!sel) return;
+  const prev = currentId !== undefined ? currentId : sel.value;
+  const list = vouchers.filter(v => (v.type === 'evoucher' || v.type === 'upgrade') && (!v.used || v.id === prev));
+  sel.innerHTML = '<option value="">–</option>' + list.map(v => `<option value="${escHtml(v.id)}">${escHtml(v.title || 'Gutschein')}${v.expires ? ' · bis ' + escHtml(v.expires.split('-').reverse().join('.')) : ''}${v.used ? ' (eingelöst)' : ''}</option>`).join('');
+  if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+}
+
 function populateBookingSelect(currentId) {
   const sel = document.getElementById('t-booking-with');
   if (!sel) return;
@@ -2552,6 +2572,8 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
     airline: document.getElementById('t-airline').value.trim(),
     upgradeFrom: document.getElementById('t-upgrade-from').value,
     upgradeCost: parseFloat(document.getElementById('t-upgrade-cost').value) || 0,
+    upgradeVia: document.getElementById('t-upgrade-via').value,
+    upgradeVoucherId: document.getElementById('t-upgrade-voucher').value,
     qpMode: document.getElementById('t-qpmode').value,
     noPoints: document.getElementById('t-nopoints').checked,
     flightInfo: readFlightRows(),
@@ -2577,6 +2599,18 @@ document.getElementById('trip-form').addEventListener('submit', async (e) => {
   }
   pruneBookings();
   await saveTrips();
+
+  // Für das Upgrade eingelösten Gutschein abhaken (und einen abgewählten wieder öffnen)
+  const prevVoucher = prevTrip && prevTrip.upgradeVoucherId;
+  if (prevVoucher && prevVoucher !== trip.upgradeVoucherId) {
+    const pv = vouchers.find(v => v.id === prevVoucher);
+    if (pv && pv.usedForTrip === tripId) { pv.used = false; pv.usedDate = null; delete pv.usedForTrip; }
+  }
+  if (trip.upgradeVoucherId) {
+    const v = vouchers.find(x => x.id === trip.upgradeVoucherId);
+    if (v) { v.used = true; v.usedDate = trip.date; v.usedForTrip = tripId; }
+  }
+  if (prevVoucher || trip.upgradeVoucherId) await saveVouchers();
 
   // Meilen für diesen Flug direkt mit anlegen, statt sie separat im
   // Meilen-Tab nachzutragen — mit sourceTripId markiert, damit sie beim
