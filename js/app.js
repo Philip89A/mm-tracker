@@ -216,9 +216,10 @@ function tripPoints(t) {
 
 // Zerlegung der Tabellen-Points eines Trips:
 //  booked  = Points der gebuchten Klasse je Segment (bei Upgrade die Ausgangsklasse)
-//  upgrade = Mehr-Points durch die höhere geflogene Klasse (nur die Klassendifferenz)
-//  co2     = CO₂-Bonus — er bezieht sich auf die gebuchte Klasse, nicht auf das Upgrade
-// Beispiel kontinental: Economy gebucht (20) + Upgrade Business (+20) + CO₂ 80 % auf 20 (+16) = 56.
+//  upgrade = Mehr-Points durch die höhere geflogene Klasse (nur die Klassendifferenz, ohne Bonus)
+//  co2     = CO₂-Bonus auf die tatsächlich geflogene Klasse je Segment
+// Beispiel OTP–VIE–FRA, kontinental, CO₂ 80 %, OTP→VIE auf Business hochgestuft:
+//  gebucht 20 + 20 = 40, Upgrade +20, CO₂ 80 % auf 40 (Business) + 80 % auf 20 (Economy) = +48 → 108.
 function tripPointParts(t) {
   let booked = 0, flown = 0;
   tripSegments(t).forEach(g => {
@@ -227,7 +228,7 @@ function tripPointParts(t) {
     flown += pointsForSegment(g.range, g.cls);
   });
   const upgrade = Math.max(0, flown - booked);
-  const co2 = Math.round(booked * ((t.co2 || 0) / 100));
+  const co2 = Math.round(flown * ((t.co2 || 0) / 100));
   return { booked, upgrade, co2, total: booked + upgrade + co2 };
 }
 
@@ -274,7 +275,7 @@ function tripUpgradeDeltaQP(t) {
 }
 
 // Eigene Ausgaben eines Trips und was sie gebracht haben, getrennt nach Flug (gebuchte
-// Klasse), Upgrade (Klassendifferenz) und CO₂-Kompensation (Bonus auf die gebuchte Klasse);
+// Klasse), Upgrade (Klassendifferenz) und CO₂-Kompensation (Bonus auf die geflogene Klasse);
 // zusammen ergibt das tripPoints(). Bei einem manuellen Points-Wert (pointsOverride) lässt
 // sich nichts aufteilen: alles gilt dann als Ertrag des Flugs.
 function tripSpend(t) {
@@ -1417,7 +1418,7 @@ function renderUpgrades() {
   const sorted = [...upgrades].sort((a, b) => new Date(b.date) - new Date(a.date));
   list.innerHTML = sorted.map(u => {
     const idx = upgrades.indexOf(u);
-    const deltaQP = pointsForSegment(u.range, u.to) - pointsForSegment(u.range, u.from); // CO₂-Bonus gilt nur für die gebuchte Klasse
+    const deltaQP = pointsForSegment(u.range, u.to) - pointsForSegment(u.range, u.from); // reine Klassendifferenz, der CO₂-Bonus zählt zum CO₂-Ausgleich
     const perQP = deltaQP > 0 ? (u.cost / deltaQP) : null;
     return `<div class="trip">
       <div class="top">

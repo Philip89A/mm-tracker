@@ -129,7 +129,7 @@
     if (r.free.n) notes.push(`💼 ${r.free.n} ${r.free.n === 1 ? 'Flug' : 'Flüge'} vom Arbeitgeber/Dritten bezahlt: gratis +${fmt(r.free.p)} P / +${fmt(r.free.q)} QP.`);
     if (r.flightsNoPrice) notes.push(`${r.flightsNoPrice} ${r.flightsNoPrice === 1 ? 'Flug' : 'Flüge'} ohne Preis und ohne Vermerk „Arbeitgeber/Dritte“ — nicht gewertet. Preis eintragen oder „Wer zahlt den Flug?“ im Trip ändern.`);
     notes.push(r.missing ? `🧾 ${r.missing} ${r.missing === 1 ? 'Ausgabe' : 'Ausgaben'} ohne Beleg (weder Nummer noch Datei).` : '🧾 Zu allen Ausgaben ist ein Beleg hinterlegt.');
-    notes.push('Upgrade-Ertrag = Mehr-Points der höheren Klasse gegenüber der gebuchten (ohne CO₂-Bonus), CO₂-Ertrag = Bonus auf die gebuchte Klasse. Einträge ohne Preis fließen nicht in €/Punkt ein.');
+    notes.push('Upgrade-Ertrag = Mehr-Points der höheren Klasse gegenüber der gebuchten (ohne CO₂-Bonus), CO₂-Ertrag = Bonus auf die tatsächlich geflogene Klasse (also auch auf die hochgestufte Teilstrecke). Einträge ohne Preis fließen nicht in €/Punkt ein.');
     html += `<div class="hint" style="margin:8px 0 0;">${notes.join('<br>')}</div>`;
 
     // Je Trip
