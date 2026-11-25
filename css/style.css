@@ -484,3 +484,8 @@ details[open] > .tf-summary::after { content: '▴'; }
 .vbar { width: 100%; max-width: 30px; background: var(--navy2, #1f4e8c); border-radius: 4px 4px 0 0; }
 .vval { font-size: 10px; font-weight: 700; color: var(--navy); margin-bottom: 2px; }
 .vlbl { font-size: 10px; color: var(--muted); margin-top: 4px; white-space: nowrap; }
+
+/* Schnellerfassung */
+.qe-head { display: grid; grid-template-columns: 1.1fr 1fr auto; gap: 8px; align-items: end; }
+.qe-head label { margin-top: 6px; font-size: 11.5px; }
+.qe-head .btn { margin-top: 0; white-space: nowrap; }

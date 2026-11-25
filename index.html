@@ -410,6 +410,49 @@
       <button type="button" class="btn secondary" style="margin-top:12px;" onclick="exportTripsCsv()">⬇️ Trip-Log als CSV exportieren</button>
     </div>
 
+    <div class="card tp tp-add" id="card-quick">
+      <h2>⚡ Schnellerfassung per Flugnummer</h2>
+      <p class="hint" style="margin-top:0;">Datum und Flugnummer eintragen und auf 🔎 tippen: Strecke, Zeiten, Flugzeug, Kennzeichen und Airline werden abgerufen. Prüfe die Angaben und korrigiere bei Abweichungen — du ergänzt nur Klasse und Sitz. Mehrere Flüge (Umstieg, Rückflug) werden ein Trip. Ohne eingerichtete Datenquelle kannst du die Felder auch selbst ausfüllen.</p>
+      <div id="qe-legs"></div>
+      <button type="button" class="btn small secondary" id="qe-add-leg" style="margin-top:8px;">+ Weiterer Flug (Umstieg oder Rückflug)</button>
+      <div class="row2">
+        <div>
+          <label>CO₂-Kompensation?</label>
+          <select id="qe-co2">
+            <option value="0">Nein</option>
+            <option value="30">Ja, ~30% Bonus</option>
+            <option value="80" selected>Ja, ~80% Bonus</option>
+          </select>
+        </div>
+        <div>
+          <label>Wer zahlt den Flug?</label>
+          <select id="qe-paidby">
+            <option value="self">Ich selbst</option>
+            <option value="other">Arbeitgeber / Dritte</option>
+          </select>
+        </div>
+      </div>
+      <label>Reiseanlass</label>
+      <select id="qe-reason">
+        <option value="">ohne Angabe</option>
+        <option value="business">Geschäftlich</option>
+        <option value="personal">Privat</option>
+      </select>
+      <button type="button" class="btn" id="qe-apply" style="margin-top:12px;">Als Trip übernehmen und prüfen ↓</button>
+      <p class="hint" id="qe-msg" style="margin:6px 0 0;"></p>
+      <details id="qe-setup" style="margin-top:10px;">
+        <summary style="cursor:pointer; font-weight:600; color:var(--navy);">🔑 Datenquelle für den Abruf einrichten</summary>
+        <p class="hint" style="margin:6px 0;"><b>AeroDataBox</b> (über RapidAPI) liefert Flugdaten vieler Airlines, auch für vergangene Flüge, inklusive Kennzeichen. Registrieren, AeroDataBox abonnieren (es gibt einen kleinen kostenlosen Tarif — Konditionen bitte selbst prüfen) und den API-Schlüssel hier eintragen. Er wird nur auf dem Server gespeichert. Ohne AeroDataBox nutzt der Abruf den Lufthansa-Zugang aus Rechner → Planer → Fahrplan-Suche; der kennt nur Flüge der Lufthansa Group und nur wenige Tage um heute.</p>
+        <p class="hint" id="qe-status" style="margin:0 0 6px;"></p>
+        <label style="margin-top:0;">AeroDataBox-Schlüssel (X-RapidAPI-Key)</label>
+        <input type="password" id="qe-key" autocomplete="off">
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button type="button" class="btn small" id="qe-key-save">Speichern</button>
+          <button type="button" class="btn small secondary" id="qe-key-del">Schlüssel löschen</button>
+        </div>
+      </details>
+    </div>
+
     <div class="card tp tp-add">
       <h2>➕ Trip hinzufügen</h2>
       <form id="trip-form">
@@ -1113,6 +1156,7 @@
 <script src="js/map.js"></script>
 <script src="js/extras.js"></script>
 <script src="js/stats.js"></script>
+<script src="js/quick.js"></script>
 <script src="js/receipts.js"></script>
 <script src="js/sim.js"></script>
 <script src="js/spend.js"></script>

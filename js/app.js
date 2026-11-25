@@ -2284,14 +2284,14 @@ function seatKind(f) {
 
 const FLIGHT_ROW_FIELDS = [
   ['flightNo', 'Flugnr.', 'LH 1418'], ['from', 'Von', 'FRA'], ['to', 'Nach', 'OTP'], ['duration', 'Dauer', '2h 16m'],
-  ['aircraft', 'Flugzeugtyp', 'A320'], ['registration', 'Kennzeichen', 'D-AIWA'], ['seat', 'Sitz', '15A']
+  ['aircraft', 'Flugzeugtyp', 'A320'], ['registration', 'Kennzeichen', 'D-AIWA'], ['seat', 'Sitz', '15A'], ['date', 'Datum', '']
 ];
 
 function addFlightRow(data = {}) {
   const row = document.createElement('div');
   row.className = 'flight-row';
   row.innerHTML = `<div class="flight-row-grid">${FLIGHT_ROW_FIELDS.map(([k, label, ph]) =>
-      `<div><label>${label}</label><input type="text" data-f="${k}" placeholder="${ph}" autocomplete="off" value="${escHtml(data[k] || '')}"></div>`).join('')}
+      `<div><label>${label}</label><input type="${k === 'date' ? 'date' : 'text'}" data-f="${k}" placeholder="${ph}" autocomplete="off" value="${escHtml(data[k] || '')}"></div>`).join('')}
       <div><label>Kabine</label><select data-f="cabin"><option value="">–</option>${Object.entries(CABIN_LABELS).map(([k, v]) => `<option value="${k}"${data.cabin === k ? ' selected' : ''}>${v}</option>`).join('')}</select></div>
     </div><button type="button" class="btn secondary flight-row-del">Teilstrecke entfernen</button>`;
   row.querySelector('.flight-row-del').addEventListener('click', () => row.remove());
