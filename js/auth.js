@@ -40,7 +40,27 @@ async function enterAppForSession(session) {
   }
 }
 
+// Demo-Modus (?demo): ohne Login, Beispieldaten nur im Browser (siehe js/data/demo.js)
+async function enterDemo() {
+  currentUserId = 'demo';
+  const bar = document.createElement('div');
+  bar.className = 'demo-bar';
+  bar.innerHTML = '<span>🧪 <b>Demo</b> mit Beispieldaten — Änderungen bleiben nur in diesem Browser, nichts wird auf einem Server gespeichert.</span>' +
+    '<button type="button" class="btn small secondary" id="demo-reset-btn">Beispieldaten zurücksetzen</button>';
+  document.getElementById('app-shell').prepend(bar);
+  document.getElementById('logout-btn').textContent = 'Demo verlassen';
+  document.getElementById('demo-reset-btn').addEventListener('click', () => {
+    if (confirm('Eigene Änderungen verwerfen und die Beispieldaten neu laden?')) resetDemoData();
+  });
+  showApp();
+  await loadAll();
+}
+
 async function initAuth() {
+  if (typeof DEMO_MODE !== 'undefined' && DEMO_MODE) {
+    await enterDemo();
+    return;
+  }
   if (!supabaseClient) {
     // No Supabase config at all — nothing we can authenticate against.
     document.getElementById('login-error').textContent = 'Supabase ist nicht konfiguriert.';
@@ -121,6 +141,10 @@ document.getElementById('recovery-form').addEventListener('submit', async (e) =>
 });
 
 document.getElementById('logout-btn').addEventListener('click', async () => {
+  if (typeof DEMO_MODE !== 'undefined' && DEMO_MODE) {
+    window.location.href = window.location.pathname; // Demo verlassen → normale Anmeldung
+    return;
+  }
   await supabaseClient.auth.signOut();
 });
 

@@ -2133,6 +2133,7 @@ async function saveTrips() { await DB.set(KEY_TRIPS, trips); }
 // Ruft eine Supabase Edge Function mit dem Token des angemeldeten Nutzers auf.
 // Fehler kommen mit der lesbaren Meldung der Funktion (und needsSetup, falls ein API-Zugang fehlt).
 async function callEdge(name, body) {
+  if (typeof DEMO_MODE !== 'undefined' && DEMO_MODE) throw new Error('Im Demo-Modus nicht verfügbar (dafür ist ein eigenes Konto nötig).');
   const { data, error } = await supabaseClient.functions.invoke(name, { body });
   if (!error) return data;
   let payload = null;

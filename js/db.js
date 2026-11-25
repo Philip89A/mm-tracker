@@ -15,7 +15,9 @@ let currentUserId = null;
 
 const DB = (() => {
   const TABLE = 'mm_store';
-  const client = supabaseClient;
+  // Demo-Modus (?demo): nie mit Supabase reden, nur lokal mit Beispieldaten als Startwert
+  const DEMO = typeof DEMO_MODE !== 'undefined' && DEMO_MODE;
+  const client = DEMO ? null : supabaseClient;
 
   // Local cache keys are namespaced per user so two accounts on the same
   // browser/device never see each other's cached data, even offline.
@@ -29,7 +31,7 @@ const DB = (() => {
     if (state === 'ok') { el.textContent = 'synchronisiert'; el.className = 'sync-tag ok'; }
     else if (state === 'busy') { el.textContent = 'speichert…'; el.className = 'sync-tag busy'; }
     else if (state === 'offline') { el.textContent = 'offline (lokal)'; el.className = 'sync-tag off'; }
-    else { el.textContent = 'lokal'; el.className = 'sync-tag off'; }
+    else { el.textContent = DEMO ? 'Demo (nur lokal)' : 'lokal'; el.className = 'sync-tag off'; }
   }
 
   function readLocal(key, fallback) {
@@ -53,7 +55,7 @@ const DB = (() => {
   async function get(key, fallback = null) {
     if (!client) {
       setSyncTag('off');
-      return readLocal(key, fallback);
+      return readLocal(key, DEMO ? demoDefault(key, fallback) : fallback);
     }
     try {
       const { data, error } = await client.from(TABLE).select('value').eq('key', key).maybeSingle();
