@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mm-tracker-v86';
+const CACHE_NAME = 'mm-tracker-v87';
 const APP_SHELL = [
   './',
   './index.html',
@@ -10,6 +10,7 @@ const APP_SHELL = [
   './js/db.js',
   './js/data/airports.js',
   './js/data/countries.js',
+  './js/data/liveries.js',
   './js/app.js',
   './js/map.js',
   './js/extras.js',

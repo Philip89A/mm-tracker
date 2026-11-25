@@ -1021,7 +1021,7 @@ function renderTrips() {
           ${t.historical ? `<div class="meta"><span class="tag mid">🕰️ Historisch — nicht in Gesamtsumme</span></div>` : ''}
           ${t.planned ? `<div class="meta"><span class="tag ok">📅 Geplant</span></div>` : ''}
           ${t.noPoints ? `<div class="meta"><span class="tag mid">ℹ️ nur Flugdaten — keine Punkte berechnet</span></div>` : ''}
-          ${tripFlightInfos(t).map(f => `<div class="meta">✈️ ${escHtml(flightInfoText(f))}</div>`).join('')}
+          ${tripFlightInfos(t).map(f => `<div class="meta">✈️ ${escHtml(flightInfoText(f, t.date))}</div>`).join('')}
           ${segmentPointsLine(t) ? `<div class="meta">🧮 Je Segment: ${segmentPointsLine(t)}</div>` : ''}
           ${UPGRADE_NO_POINTS[t.upgradeVia] && t.upgradeFrom ? `<div class="meta">${t.upgradeVia === 'free' ? '🎁' : '🎫'} Upgrade von ${labelClass(t.upgradeFrom)} ${UPGRADE_NO_POINTS[t.upgradeVia]} — Points nach gebuchter Klasse${t.upgradeVoucherId && vouchers.find(v => v.id === t.upgradeVoucherId) ? ' (Gutschein „' + escHtml(vouchers.find(v => v.id === t.upgradeVoucherId).title) + '“)' : ''}</div>` : ''}
           ${tripUpgradeDeltaQP(t) > 0 ? `<div class="meta">⬆️ Upgrade von ${labelClass(t.upgradeFrom)}${t.upgradeCost > 0 ? ': ' + t.upgradeCost.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' € für +' + tripUpgradeDeltaQP(t) + ' QP (' + (t.upgradeCost / tripUpgradeDeltaQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/QP)' : ''}</div>` : ''}
@@ -2332,9 +2332,16 @@ function tripFlightInfos(t) {
   return [{ from: single ? r.known[0] : '', to: single ? r.known[1] : '', ...fi }];
 }
 
-function flightInfoText(f) {
+// Lackierung als kurzer Zusatz: 🎨 belegt/eingetragen, 🎨? Beginn bzw. Ende nicht belegt
+function liveryTag(f, tripDate) {
+  const lv = typeof liveryFor === 'function' ? liveryFor(f.registration, f.date || tripDate, f.livery) : null;
+  if (!lv || lv.status === 'other') return '';
+  return (lv.status === 'unclear' ? '🎨? ' : '🎨 ') + lv.name;
+}
+
+function flightInfoText(f, tripDate) {
   const kind = seatKind(f);
-  return [f.flightNo, (f.from && f.to) ? `${f.from}–${f.to}` : '', f.aircraft, f.registration, f.seat ? `Sitz ${f.seat}${kind ? ' (' + SEAT_KINDS[kind] + ')' : ''}` : '',
+  return [f.flightNo, (f.from && f.to) ? `${f.from}–${f.to}` : '', f.aircraft, f.registration, liveryTag(f, tripDate), f.seat ? `Sitz ${f.seat}${kind ? ' (' + SEAT_KINDS[kind] + ')' : ''}` : '',
     f.cabin ? (CABIN_LABELS[f.cabin] || f.cabin) : '', f.duration, ...LEG_MILES.filter(([k]) => f[k]).map(([k, , short]) => '+' + Number(f[k]).toLocaleString('de-DE') + ' ' + (short === 'Meilen' ? 'Meilen' : short + '-Meilen'))].filter(Boolean).join(' · ');
 }
 
@@ -2364,7 +2371,7 @@ function seatKind(f) {
 
 const FLIGHT_ROW_FIELDS = [
   ['flightNo', 'Flugnr.', 'LH 1418'], ['from', 'Von', 'FRA'], ['to', 'Nach', 'OTP'], ['duration', 'Dauer', '2h 16m'],
-  ['aircraft', 'Flugzeugtyp', 'A320'], ['registration', 'Kennzeichen', 'D-AIWA'], ['seat', 'Sitz', '15A'], ['date', 'Datum', ''],
+  ['aircraft', 'Flugzeugtyp', 'A320'], ['registration', 'Kennzeichen', 'D-AIWA'], ['livery', 'Lackierung', 'automatisch'], ['seat', 'Sitz', '15A'], ['date', 'Datum', ''],
   ['miles', 'Meilen', '668'], ['execMiles', 'Executive Meilen', '0'], ['co2Miles', 'CO₂-Kompensationsmeilen', '0']
 ];
 // Meilen je Teilstrecke: Feld im Flug → Kategorie im Meilen-Tab
@@ -2378,6 +2385,17 @@ function addFlightRow(data = {}) {
       <div><label>Kabine</label><select data-f="cabin"><option value="">–</option>${Object.entries(CABIN_LABELS).map(([k, v]) => `<option value="${k}"${data.cabin === k ? ' selected' : ''}>${v}</option>`).join('')}</select></div>
     </div><button type="button" class="btn secondary flight-row-del">Teilstrecke entfernen</button>`;
   row.querySelector('.flight-row-del').addEventListener('click', () => row.remove());
+  // Bekannte Sonderlackierung zum Kennzeichen/Datum als Vorschlag im Feld „Lackierung“ zeigen
+  const lvInput = row.querySelector('[data-f="livery"]');
+  const showLivery = () => {
+    const reg = row.querySelector('[data-f="registration"]').value;
+    const date = row.querySelector('[data-f="date"]').value || document.getElementById('t-date').value;
+    const lv = typeof liveryFor === 'function' ? liveryFor(reg, date, '') : null;
+    lvInput.placeholder = !lv ? 'Standard' : lv.status === 'other' ? `Standard (${lv.name} ${lv.when})` : lv.name + (lv.status === 'unclear' ? ' (?)' : '');
+    lvInput.title = lv ? lv.src : 'Keine Sonderlackierung bekannt — bei Bedarf selbst eintragen';
+  };
+  row.querySelectorAll('[data-f="registration"], [data-f="date"]').forEach(el => el.addEventListener('input', showLivery));
+  showLivery();
   document.getElementById('t-flights-rows').appendChild(row);
 }
 

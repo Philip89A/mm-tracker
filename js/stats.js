@@ -165,6 +165,24 @@
     withAc.forEach(l => { add(types, l.aircraft, 1); add(typeMin, l.aircraft, l.dur); });
     legs.filter(l => l.reg).forEach(l => { add(tails, l.reg, 1); tailType[l.reg] = l.aircraft; });
     const favType = top(types, 1)[0], favTail = top(tails, 1)[0];
+
+    // Sonderlackierungen: je Flug zum Flugdatum (manueller Eintrag am Flug hat Vorrang)
+    const tailLivery = {}, lvFlights = { sure: [], unclear: [], other: [] };
+    legs.filter(l => l.reg || (l.f && l.f.livery)).forEach(l => {
+      const lv = liveryFor(l.reg, l.date, l.f && l.f.livery);
+      if (!lv) return;
+      if (lv.status !== 'other') tailLivery[l.reg] = lv.name;
+      (lv.status === 'other' ? lvFlights.other : lv.status === 'unclear' ? lvFlights.unclear : lvFlights.sure).push({ l, lv });
+    });
+    const lvLine = ({ l, lv }, extra) => `<div class="mt-cat-row" style="padding:4px 0; border-top:1px solid var(--gray-border); align-items:flex-start;">
+      <span><b>🎨 ${esc(lv.name)}</b><br><span class="stat-sub">${esc(l.reg)}${l.aircraft ? ' · ' + esc(l.aircraft) : ''} · ${esc(l.from)}–${esc(l.to)}${l.flightNo ? ' · ' + esc(l.flightNo) : ''}${extra ? ' · ' + esc(extra) : ''}</span></span>
+      <span class="stat-sub" style="text-align:right;" title="${esc(lv.src || '')}">${esc((l.date || '').split('-').reverse().join('.'))}</span></div>`;
+    const byDate = (a, b) => (b.l.date || '').localeCompare(a.l.date || '');
+    const lvNames = new Set(lvFlights.sure.map(x => x.lv.name));
+    const liveryBlock = (lvFlights.sure.length || lvFlights.unclear.length || lvFlights.other.length) ? statBlock(`🎨 Sonderlackierungen · ${lvFlights.sure.length} ${lvFlights.sure.length === 1 ? 'Flug' : 'Flüge'}${lvNames.size ? ' · ' + lvNames.size + ' verschiedene' : ''}`,
+      lvFlights.sure.sort(byDate).map(x => lvLine(x, x.lv.status === 'manual' ? 'von dir eingetragen' : x.lv.status === 'likely' ? 'aktuell so lackiert, seit wann nicht belegt' : '')).join('') +
+      (lvFlights.unclear.length ? `<div class="stat-sub" style="margin-top:8px;">Unklar, ob zum Flugdatum noch/schon so lackiert — im Flug unter „Lackierung“ bestätigen (Name) oder „Standard“ eintragen:</div>` + lvFlights.unclear.sort(byDate).map(x => lvLine(x, x.lv.src)).join('') : '') +
+      (lvFlights.other.length ? `<div class="stat-sub" style="margin-top:8px;">Maschine trägt/trug eine Sonderlackierung, aber nicht bei deinem Flug:</div>` + lvFlights.other.sort(byDate).map(x => lvLine(x, x.lv.when)).join('') : '')) : '';
     const cls = new Map(Object.keys(CLS_LABEL).map(k => [k, 0]));
     legs.forEach(l => add(cls, l.cls || 'unknown', l.w));
     const seats = new Map(), kinds = new Map([['Fenster', 0], ['Mitte', 0], ['Gang', 0]]), unknownTypes = new Map();
@@ -180,7 +198,8 @@
     const share = (m) => { const tot = [...m.values()].reduce((a, b) => a + b, 0) || 1; return [...m.entries()].filter(([, v]) => v > 0).map(([k, v]) => ({ label: k, value: v, text: `${fmt(v)} · ${Math.round(v / tot * 100)} %` })); };
     html += section('🛩️ Flugzeuge', `<div class="stat-row" style="flex-wrap:wrap;">${kpi(types.size ? `${types.size} / ${tails.size}` : '–', 'Typen / Maschinen')}${kpi(favType ? esc(favType[0]) : '–', favType ? `meistgeflogener Typ · ${favType[1]} Flüge${typeMin.get(favType[0]) ? ' · ' + fmt(typeMin.get(favType[0]) / 60) + ' h' : ''}` : 'Typ')}${kpi(favTail ? esc(favTail[0]) : '–', favTail ? `häufigste Maschine · ${favTail[1]}×${tailType[favTail[0]] ? ' · ' + esc(tailType[favTail[0]]) : ''}` : 'Kennzeichen')}</div>
       ${statBlock('Flugzeugtypen', bars(top(types, 6).map(([k, v]) => ({ label: k, value: v, text: `${v}×${typeMin.get(k) ? ' · ' + fmt(typeMin.get(k) / 60) + ' h' : ''}` })), ''))}
-      ${statBlock('Häufigste Kennzeichen', bars(top(tails, 6).map(([k, v]) => ({ label: `${k}${tailType[k] ? ' · ' + tailType[k] : ''}`, value: v, text: v + '×' })), ''))}`);
+      ${statBlock('Häufigste Kennzeichen', bars(top(tails, 6).map(([k, v]) => ({ label: `${k}${tailType[k] ? ' · ' + tailType[k] : ''}${tailLivery[k] ? ' · 🎨 ' + tailLivery[k] : ''}`, value: v, text: v + '×' })), ''))}
+      ${liveryBlock}`);
     html += section('💺 Klasse & Sitz', `${statBlock('Klasse', bars(share(new Map([...cls].map(([k, v]) => [CLS_LABEL[k], v]))), ''))}
       ${statBlock(`Sitzart${favSeat ? ` · Lieblingsplatz ${esc(favSeat[0])} (${favSeat[1]}×)` : ''}`, bars(share(kinds), ''))}
       ${statBlock('Reiseanlass', bars(share(reasons), ''))}
