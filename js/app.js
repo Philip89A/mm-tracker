@@ -211,9 +211,24 @@ function pointsForSegment(range, cls) {
 function tripPoints(t) {
   if (t.noPoints) return 0; // "nur Flugdaten": archivierter Flug, Punkte bewusst nicht berechnet
   if (t.pointsOverride > 0) return t.pointsOverride;
-  const base = tripSegments(t).reduce((s, g) => s + pointsForSegment(g.range, g.cls), 0);
-  const bonus = Math.round(base * (t.co2 / 100));
-  return base + bonus;
+  return tripPointParts(t).total;
+}
+
+// Zerlegung der Tabellen-Points eines Trips:
+//  booked  = Points der gebuchten Klasse je Segment (bei Upgrade die Ausgangsklasse)
+//  upgrade = Mehr-Points durch die höhere geflogene Klasse (nur die Klassendifferenz)
+//  co2     = CO₂-Bonus — er bezieht sich auf die gebuchte Klasse, nicht auf das Upgrade
+// Beispiel kontinental: Economy gebucht (20) + Upgrade Business (+20) + CO₂ 80 % auf 20 (+16) = 56.
+function tripPointParts(t) {
+  let booked = 0, flown = 0;
+  tripSegments(t).forEach(g => {
+    const bookedCls = t.upgradeFrom && t.upgradeFrom !== g.cls ? t.upgradeFrom : g.cls;
+    booked += pointsForSegment(g.range, bookedCls);
+    flown += pointsForSegment(g.range, g.cls);
+  });
+  const upgrade = Math.max(0, flown - booked);
+  const co2 = Math.round(booked * ((t.co2 || 0) / 100));
+  return { booked, upgrade, co2, total: booked + upgrade + co2 };
 }
 
 // Klasse und Reichweite je Segment. Normalerweise gilt für alle Segmente dieselbe Klasse (t.cls);
@@ -250,40 +265,44 @@ function tripQP(t) {
 const QP_AIRLINES_FULL = ['lufthansa', 'swiss', 'austrian airlines', 'brussels airlines', 'discover airlines', 'lot polish airlines', 'ita airways', 'air dolomiti', 'croatia airlines', 'luxair'];
 const QP_AIRLINES_PARTNER = ['air canada', 'united', 'singapore airlines', 'ana', 'thai airways', 'turkish airlines', 'sas'];
 
-// Zusatz-QP, die ein bezahltes Upgrade gegenüber der ursprünglich gebuchten
-// Klasse bringt. Die Punkte selbst stecken schon zu 100% in tripPoints() (Klasse
-// nach dem Upgrade) — dieser Wert dient nur der €/QP-Auswertung des Aufpreises
-// und wird NIRGENDS auf die Summen aufgeschlagen.
+// Zusatz-Points/QP, die ein bezahltes Upgrade gegenüber der gebuchten Klasse bringt —
+// nur die Klassendifferenz der aufgewerteten Segmente, ohne CO₂-Bonus. Die Punkte stecken
+// schon in tripPoints(); der Wert dient der €/QP-Auswertung des Aufpreises.
 function tripUpgradeDeltaQP(t) {
-  if (!t.upgradeFrom) return 0;
-  // Nur Segmente, die tatsächlich höher als die gebuchte Klasse geflogen werden, bringen Zusatzpunkte.
-  return tripSegments(t).reduce((s, g) => {
-    if (g.cls === t.upgradeFrom) return s;
-    return s + Math.max(0, segmentPointsWithCo2(g.range, g.cls, t.co2) - segmentPointsWithCo2(g.range, t.upgradeFrom, t.co2));
-  }, 0);
+  if (!t.upgradeFrom || t.noPoints || t.pointsOverride > 0) return 0;
+  return tripPointParts(t).upgrade;
 }
 
-// Eigene Ausgaben eines Trips und was sie gebracht haben, getrennt nach Flug, Upgrade und
-// CO₂-Kompensation. Das Upgrade zählt wie in tripUpgradeDeltaQP (inkl. CO₂-Bonus auf die
-// Differenz), der CO₂-Anteil ist der Bonus auf den ursprünglich gebuchten Teil. Die Summe
-// ergibt tripPoints(). Bei einem manuellen Points-Wert (pointsOverride) lässt sich nichts
-// aufteilen: alles gilt dann als Ertrag des Flugs.
+// Eigene Ausgaben eines Trips und was sie gebracht haben, getrennt nach Flug (gebuchte
+// Klasse), Upgrade (Klassendifferenz) und CO₂-Kompensation (Bonus auf die gebuchte Klasse);
+// zusammen ergibt das tripPoints(). Bei einem manuellen Points-Wert (pointsOverride) lässt
+// sich nichts aufteilen: alles gilt dann als Ertrag des Flugs.
 function tripSpend(t) {
   const q = (p) => (t.qpMode === 'pointsOnly' ? 0 : p);
   const flightPaidByMe = t.paidBy !== 'other';
-  const total = tripPoints(t);
-  let fp = total, up = 0, co2p = 0;
+  let fp = tripPoints(t), up = 0, co2p = 0;
   if (!t.noPoints && !(t.pointsOverride > 0)) {
-    const base0 = tripSegments(t).reduce((s, g) => s + pointsForSegment(g.range, t.upgradeFrom && t.upgradeFrom !== g.cls ? t.upgradeFrom : g.cls), 0);
-    up = tripUpgradeDeltaQP(t);
-    co2p = Math.max(0, total - base0 - up);
-    fp = total - up - co2p;
+    const parts = tripPointParts(t);
+    fp = parts.booked; up = parts.upgrade; co2p = parts.co2;
   } else if (t.noPoints) { fp = 0; }
   return {
     flight: { cost: flightPaidByMe ? (t.cost || 0) : 0, paidByMe: flightPaidByMe, p: fp, q: q(fp) },
     upgrade: { cost: t.upgradeCost || 0, p: up, q: q(up) },
     co2: { cost: t.co2Cost || 0, p: co2p, q: q(co2p) }
   };
+}
+
+// Trip-Log-Zeile zum CO₂-Ausgleich. Bei zusammen gebuchten Trips gilt der Preis für die ganze
+// Buchung, also werden Kosten und Bonus-Points aller Trips der Buchung zusammengerechnet.
+function co2LineText(t) {
+  const mates = t.bookingId ? trips.filter(x => x.bookingId === t.bookingId) : [t];
+  const cost = mates.reduce((s, m) => s + (m.co2Cost || 0), 0);
+  const p = mates.reduce((s, m) => s + tripSpend(m).co2.p, 0);
+  const eur = (n) => n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (!p) return `${eur(t.co2Cost)} €`;
+  return mates.length > 1
+    ? `${eur(t.co2Cost)} € · für die ganze Buchung (${mates.length} Trips) ${eur(cost)} € für +${p} Points (${eur(cost / p)} €/Point)`
+    : `${eur(cost)} € für +${p} Points (${eur(cost / p)} €/Point)`;
 }
 
 function segmentPointsWithCo2(range, cls, co2) {
@@ -898,14 +917,14 @@ function renderTrips() {
   const paid = filtered.filter(t => t.cost > 0 && !t.planned && t.paidBy !== 'other');
   if (paid.length > 0) {
     const cost = paid.reduce((s, t) => s + t.cost, 0), qp = paid.reduce((s, t) => s + tripQP(t), 0), costQp = paid.filter(t => tripQP(t) > 0).reduce((s, t) => s + t.cost, 0);
-    costEl.textContent = `💶 Ausgaben${filterYear ? ' ' + filterYear : ''}: ${cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} € für ${paid.length} bezahlte ${paid.length === 1 ? 'Flug' : 'Flüge'}${qp > 0 ? ` (Ø ${(costQp / qp).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})} €/QP, nur Flüge mit QP)` : ''} — nur Trips mit eingetragenem Preis, ohne geplante.`;
+    costEl.textContent = `💶 Ausgaben${filterYear ? ' ' + filterYear : ''}: ${cost.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})} € für ${paid.length} bezahlte ${paid.length === 1 ? 'Flug' : 'Flüge'}${qp > 0 ? ` (Ø ${(costQp / qp).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})} €/QP, nur Flüge mit QP)` : ''} — nur Trips mit eingetragenem Preis, ohne geplante.`;
     costEl.style.display = 'block';
   }
   const upgraded = filtered.filter(t => t.upgradeCost > 0 && tripUpgradeDeltaQP(t) > 0);
   if (upgraded.length > 0) {
     const cost = upgraded.reduce((s, t) => s + t.upgradeCost, 0);
     const dq = upgraded.reduce((s, t) => s + tripUpgradeDeltaQP(t), 0);
-    upgSummaryEl.textContent = `⬆️ Upgrades${filterYear ? ' ' + filterYear : ''}: ${upgraded.length} Flug${upgraded.length === 1 ? '' : 'e'}, ${cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} € Aufpreis für +${dq} QP (Ø ${(cost / dq).toLocaleString('de-DE', {minimumFractionDigits: 2})} €/QP) — die Punkte stecken bereits in den Flügen unten.`;
+    upgSummaryEl.textContent = `⬆️ Upgrades${filterYear ? ' ' + filterYear : ''}: ${upgraded.length} Flug${upgraded.length === 1 ? '' : 'e'}, ${cost.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})} € Aufpreis für +${dq} QP (Ø ${(cost / dq).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})} €/QP) — die Punkte stecken bereits in den Flügen unten.`;
     upgSummaryEl.style.display = 'block';
   }
 
@@ -948,14 +967,14 @@ function renderTrips() {
         <div>
           <div class="route">${escHtml(t.route)}</div>
           <div class="meta">${t.date} · ${tripRangeLabel(t)} · ${tripClassLabel(t)} · ${t.segments} Segm.${t.co2 > 0 ? ' · CO₂ +' + t.co2 + '%' : ''}${t.airline ? ' · ' + escHtml(t.airline) : ''}${t.qpMode === 'pointsOnly' ? ' · Partner' : ''}</div>
-          ${t.paidBy === 'other' ? `<div class="meta">💼 Flug zahlt Arbeitgeber/Dritte${t.cost > 0 ? ' (' + t.cost.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €, nicht in deinen Ausgaben)' : ''}</div>` : ''}
-          ${t.cost > 0 && t.paidBy !== 'other' ? `<div class="meta">💶 ${t.cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} €${tripQP(t) > 0 ? ' · ' + (t.cost / tripQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP' : (tripPoints(t) > 0 ? ' · ' + (t.cost / tripPoints(t)).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/Point (keine QP)' : '')}</div>` : ''}
+          ${t.paidBy === 'other' ? `<div class="meta">💼 Flug zahlt Arbeitgeber/Dritte${t.cost > 0 ? ' (' + t.cost.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €, nicht in deinen Ausgaben)' : ''}</div>` : ''}
+          ${t.cost > 0 && t.paidBy !== 'other' ? `<div class="meta">💶 ${t.cost.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})} €${tripQP(t) > 0 ? ' · ' + (t.cost / tripQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/QP' : (tripPoints(t) > 0 ? ' · ' + (t.cost / tripPoints(t)).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/Point (keine QP)' : '')}</div>` : ''}
           ${t.historical ? `<div class="meta"><span class="tag mid">🕰️ Historisch — nicht in Gesamtsumme</span></div>` : ''}
           ${t.planned ? `<div class="meta"><span class="tag ok">📅 Geplant</span></div>` : ''}
           ${t.noPoints ? `<div class="meta"><span class="tag mid">ℹ️ nur Flugdaten — keine Punkte berechnet</span></div>` : ''}
           ${tripFlightInfos(t).map(f => `<div class="meta">✈️ ${escHtml(flightInfoText(f))}</div>`).join('')}
-          ${tripUpgradeDeltaQP(t) > 0 ? `<div class="meta">⬆️ Upgrade von ${labelClass(t.upgradeFrom)}${t.upgradeCost > 0 ? ': ' + t.upgradeCost.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' € für +' + tripUpgradeDeltaQP(t) + ' QP (' + (t.upgradeCost / tripUpgradeDeltaQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP)' : ''}</div>` : ''}
-          ${t.co2Cost > 0 ? `<div class="meta">🌱 CO₂-Ausgleich: ${t.co2Cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} €${tripSpend(t).co2.p > 0 ? ' für +' + tripSpend(t).co2.p + ' Points (' + (t.co2Cost / tripSpend(t).co2.p).toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/Point)' : ''}</div>` : ''}
+          ${tripUpgradeDeltaQP(t) > 0 ? `<div class="meta">⬆️ Upgrade von ${labelClass(t.upgradeFrom)}${t.upgradeCost > 0 ? ': ' + t.upgradeCost.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' € für +' + tripUpgradeDeltaQP(t) + ' QP (' + (t.upgradeCost / tripUpgradeDeltaQP(t)).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/QP)' : ''}</div>` : ''}
+          ${t.co2Cost > 0 ? `<div class="meta">🌱 CO₂-Ausgleich: ${co2LineText(t)}</div>` : ''}
           ${t.bookingId ? `<div class="meta">🔗 zusammen gebucht mit ${escHtml(trips.filter(x => x.id !== t.id && x.bookingId === t.bookingId).map(x => (x.date || '') + ' ' + x.route).join(', '))}</div>` : ''}
           ${typeof receiptLinesHtml === 'function' ? receiptLinesHtml(t) : ''}
           ${t.note ? `<div class="meta">📝 ${escHtml(t.note)}</div>` : ''}
@@ -1372,13 +1391,13 @@ function renderCalc() {
     <div class="top">
       <div>
         <div class="route">${c.type} ${c.idx === bestIdx ? '🏆' : ''}</div>
-        <div class="meta">${c.cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} € · ${c.totalPoints} P · ${c.totalQp} QP${c.co2 > 0 ? ' (inkl. CO₂ +' + c.co2 + '%)' : ''}</div>
+        <div class="meta">${c.cost.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})} € · ${c.totalPoints} P · ${c.totalQp} QP${c.co2 > 0 ? ' (inkl. CO₂ +' + c.co2 + '%)' : ''}</div>
         ${c.receiptNo ? `<div class="meta">🧾 Beleg ${escHtml(c.receiptNo)}</div>` : ''}
         ${c.note ? `<div class="meta">📝 ${c.note}</div>` : ''}
       </div>
       <div class="pts">
-        <div class="p">${c.perQP !== null ? c.perQP.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP' : '–'}</div>
-        <div class="q">${c.perPoint !== null ? c.perPoint.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/P' : ''}</div>
+        <div class="p">${c.perQP !== null ? c.perQP.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/QP' : '–'}</div>
+        <div class="q">${c.perPoint !== null ? c.perPoint.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/P' : ''}</div>
       </div>
     </div>
     <button class="del" onclick="deleteCalc(${c.idx})">entfernen</button>
@@ -1398,7 +1417,7 @@ function renderUpgrades() {
   const sorted = [...upgrades].sort((a, b) => new Date(b.date) - new Date(a.date));
   list.innerHTML = sorted.map(u => {
     const idx = upgrades.indexOf(u);
-    const deltaQP = segmentPointsWithCo2(u.range, u.to, u.co2) - segmentPointsWithCo2(u.range, u.from, u.co2);
+    const deltaQP = pointsForSegment(u.range, u.to) - pointsForSegment(u.range, u.from); // CO₂-Bonus gilt nur für die gebuchte Klasse
     const perQP = deltaQP > 0 ? (u.cost / deltaQP) : null;
     return `<div class="trip">
       <div class="top">
@@ -1408,8 +1427,8 @@ function renderUpgrades() {
           ${u.note ? `<div class="meta">📝 ${u.note}</div>` : ''}
         </div>
         <div class="pts">
-          <div class="p">${u.cost.toLocaleString('de-DE', {minimumFractionDigits: 2})} €</div>
-          <div class="q">+${deltaQP} QP${perQP !== null ? ' · ' + perQP.toLocaleString('de-DE', {minimumFractionDigits: 2}) + ' €/QP' : ''}</div>
+          <div class="p">${u.cost.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})} €</div>
+          <div class="q">+${deltaQP} QP${perQP !== null ? ' · ' + perQP.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €/QP' : ''}</div>
         </div>
       </div>
       <button class="del" onclick="deleteUpgrade(${idx})">entfernen</button>
