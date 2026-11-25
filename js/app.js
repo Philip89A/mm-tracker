@@ -242,12 +242,16 @@ function tripPoints(t) {
 //  co2     = CO₂-Bonus auf die tatsächlich geflogene Klasse je Segment
 // Beispiel OTP–VIE–FRA, kontinental, CO₂ 80 %, OTP→VIE auf Business hochgestuft:
 //  gebucht 20 + 20 = 40, Upgrade +20, CO₂ 80 % auf 40 (Business) + 80 % auf 20 (Economy) = +48 → 108.
+const CLASS_RANK = { economy: 0, premium: 1, business: 2, first: 3 };
+
 // Miles & More rechnet jedes Segment einzeln ab, auch bei Umsteigeverbindungen — deshalb wird
 // je Segment gerechnet und gerundet und erst dann summiert (segs = Aufteilung je Segment).
 function tripPointParts(t) {
   const pct = (t.co2 || 0) / 100;
   const segs = tripSegments(t).map(g => {
-    const bookedCls = t.upgradeFrom && t.upgradeFrom !== g.cls ? t.upgradeFrom : g.cls;
+    // „Upgrade von“ zählt nur, wenn die gebuchte Klasse wirklich niedriger ist als die geflogene;
+    // sonst (z.B. „von Business“ bei Klasse Economy) gilt die eingetragene Klasse.
+    const bookedCls = t.upgradeFrom && CLASS_RANK[t.upgradeFrom] < CLASS_RANK[g.cls] ? t.upgradeFrom : g.cls;
     const booked = pointsForSegment(g.range, bookedCls), flown = pointsForSegment(g.range, g.cls);
     const upgrade = Math.max(0, flown - booked), co2 = Math.round(flown * pct);
     return { cls: g.cls, range: g.range, booked, upgrade, co2, total: booked + upgrade + co2 };
